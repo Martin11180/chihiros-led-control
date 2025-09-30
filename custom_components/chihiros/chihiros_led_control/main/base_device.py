@@ -24,10 +24,10 @@ from bleak_retry_connector import (
 )
 from typing_extensions import Annotated
 
-from .. import commands
-from ..const import UART_RX_CHAR_UUID, UART_TX_CHAR_UUID
-from ..exception import CharacteristicMissingError
-from ..weekday_encoding import WeekdaySelect, encode_selected_weekdays
+from . import commands
+from .const import UART_RX_CHAR_UUID, UART_TX_CHAR_UUID
+from .exception import CharacteristicMissingError
+from ....helper.weekday_encoding import WeekdaySelect, encode_selected_weekdays
 
 DEFAULT_ATTEMPTS = 3
 

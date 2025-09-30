@@ -13,8 +13,8 @@ import typer
 from typing_extensions import Annotated
 
 # Import the existing doser CLI app and (optionally) the device class
-from .device.ch4_device import app as app
-from .device.ch4_device import Ch4Device  # used by the extra helpers below
+from .ch4_device import app as app
+from .ch4_device import Ch4Device  # used by the extra helpers below
 
 
 

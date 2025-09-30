@@ -1,6 +1,6 @@
 """Commander 1 device Model."""
 
-from ...chihiros_led_control.device.base_device import BaseDevice
+from ...chihiros_led_control.main.base_device import BaseDevice
 
 
 class Commander1(BaseDevice):

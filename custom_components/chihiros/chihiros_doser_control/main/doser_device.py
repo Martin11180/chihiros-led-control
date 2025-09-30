@@ -11,16 +11,16 @@ from bleak.backends.device import BLEDevice
 from bleak.exc import BleakDeviceNotFoundError, BleakError
 
 # 👈 go up to the common LED package (shared BaseDevice, time sync, weekday utils)
-from ...chihiros_led_control.device.base_device import BaseDevice
-from ...chihiros_led_control import commands as led_cmds
-from ...chihiros_led_control.weekday_encoding import (
+from ...chihiros_led_control.main.base_device import BaseDevice
+from ...chihiros_led_control.main import commands as led_cmds
+from ....helper.weekday_encoding import (
     WeekdaySelect,
     encode_selected_weekdays,
 )
 
 # 👇 these two live in the doser package root (one level up from /device)
-from .. import dosingpump
-from ..protocol import _split_ml_25_6
+from . import dosingpump
+from .protocol import _split_ml_25_6
 
 app = typer.Typer(help="Chihiros doser control")
 

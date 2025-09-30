@@ -8,8 +8,8 @@ from typing import Type
 from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
 
-from ..exception import DeviceNotFound
-from .base_device import BaseDevice
+from ..main.exception import DeviceNotFound
+from ..main.base_device import BaseDevice
 
 # Import all known model classes so they are present in this module's namespace
 from .a2 import AII
@@ -26,7 +26,7 @@ from ...chihiros_led_ch4_control.device.wrgb2_pro import WRGBIIPro
 from ...chihiros_led_ch4_control.device.universal_wrgb import UniversalWRGB
 
 # NEW: include the doser stub so discovery resolves to "Doser" instead of "fallback"
-from .doser import Doser  # make sure this file exists with _model_codes like ["DYDOSED2", "DYDOSED", "DYDOSE"]
+from ...chihiros_doser_control.device.doser import Doser  # make sure this file exists with _model_codes like ["DYDOSED2", "DYDOSED", "DYDOSE"]
 
 # Build a mapping of MODEL_CODE -> class by introspecting imported classes
 CODE2MODEL: dict[str, Type[BaseDevice]] = {}

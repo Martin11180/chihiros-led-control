@@ -11,9 +11,9 @@ from bleak.backends.device import BLEDevice
 from bleak.exc import BleakDeviceNotFoundError, BleakError
 
 # 👈 go up to the common LED package (shared BaseDevice, time sync, weekday utils)
-from ...chihiros_led_control.device.base_device import BaseDevice
-from ...chihiros_led_control import commands as led_cmds
-from ...chihiros_led_control.weekday_encoding import (
+from ...chihiros_led_control.main.base_device import BaseDevice
+from ...chihiros_led_control.main import commands as led_cmds
+from ....helper.weekday_encoding import (
     WeekdaySelect,
     encode_selected_weekdays,
 )
@@ -130,7 +130,6 @@ def cli_set_rgb_brightness_ch_4(
         ch4: Ch4Device | None = None
         try:
             ble = await _resolve_ble_or_fail(device_address)
-            print(ble)
             ch4 = Ch4Device(ble)
             await ch4.set_rgb_brightness_ch_4(brightness)
         except (BleakDeviceNotFoundError, BleakError, OSError) as ex:

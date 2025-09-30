@@ -14,13 +14,13 @@ from rich.table import Table
 from typing_extensions import Annotated
 
 from . import commands
-from .device import get_device_from_address, get_model_class_from_name
-from .weekday_encoding import WeekdaySelect
+from ..device import get_device_from_address, get_model_class_from_name
+from ....helper.weekday_encoding import WeekdaySelect
 
 # Mount the doser Typer app under "doser"
 # (use the thin shim so the import path stays stable)
-from ..chihiros_doser_control.chihirosdoserctl import app as doser_app
-from ..chihiros_led_ch4_control.chihirosch4ctl import app as ch4_app
+from ...chihiros_doser_control.main.chihirosdoserctl import app as doser_app
+from ...chihiros_led_ch4_control.main.chihirosch4ctl import app as ch4_app
 
 app = typer.Typer()
 app.add_typer(doser_app, name="doser", help="Chihiros doser control")

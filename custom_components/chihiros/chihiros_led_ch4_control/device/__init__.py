@@ -25,7 +25,7 @@ try:
     from ..const import DOMAIN  # integration domain
 
     # human-friendly weekday handling using your existing encoding helper
-    from ..chihiros_led_control.weekday_encoding import (
+    from ..helper.weekday_encoding import (
         WeekdaySelect,
         encode_selected_weekdays,
     )
