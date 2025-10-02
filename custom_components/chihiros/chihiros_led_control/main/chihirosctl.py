@@ -5,8 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 from datetime import datetime
-from typing import Any
-
+from typing import Any, Optional, Union, List
 import typer
 from bleak import BleakScanner
 from rich import print
@@ -20,12 +19,11 @@ from ....helper.weekday_encoding import WeekdaySelect
 # Mount the doser Typer app under "doser"
 # (use the thin shim so the import path stays stable)
 from ...chihiros_doser_control.main.chihirosdoserctl import app as doser_app
-from ...chihiros_led_ch4_control.main.chihirosch4ctl import app as ch4_app
+from ...helper.main.debugctl import app as debug_app
 
 app = typer.Typer()
 app.add_typer(doser_app, name="doser", help="Chihiros doser control")
-app.add_typer(ch4_app,help="Chihiros ch4 control")
-
+app.add_typer(debug_app, help="Chihiros debug control")
 msg_id = commands.next_message_id()
 
 
@@ -43,12 +41,12 @@ def _run_device_func(device_address: str, **kwargs: Any) -> None:
     asyncio.run(_async_func())
 
 
-@app.command()
+@app.command(name="list-devices")
 def list_devices(timeout: Annotated[int, typer.Option()] = 5) -> None:
     """List all bluetooth devices.
-
     TODO: add an option to show only Chihiros devices
     """
+    print("the search for Bluetooth devices is running")
     table = Table("Name", "Address", "Model")
     discovered_devices = asyncio.run(BleakScanner.discover(timeout=timeout))
     for device in discovered_devices:
@@ -63,19 +61,21 @@ def list_devices(timeout: Annotated[int, typer.Option()] = 5) -> None:
     print(table)
 
 
-@app.command()
+@app.command(name="turn-on")
 def turn_on(device_address: str) -> None:
     """Turn on a light."""
+    print(f"Connect to device {device_address} and turn on")
     _run_device_func(device_address)
 
 
-@app.command()
+@app.command(name="turn-off")
 def turn_off(device_address: str) -> None:
     """Turn off a light."""
+    print(f"Connect to device {device_address} and turn off")
     _run_device_func(device_address)
 
 
-@app.command()
+@app.command(name="set-color-brightness")
 def set_color_brightness(
     device_address: str,
     color: int,
@@ -85,23 +85,27 @@ def set_color_brightness(
     _run_device_func(device_address, color=color, brightness=brightness)
 
 
-@app.command()
+@app.command(name="set-brightness")
 def set_brightness(
     device_address: str, brightness: Annotated[int, typer.Argument(min=0, max=100)]
 ) -> None:
     """Set brightness of a light."""
+    print(f"Connect to device {device_address} and set color 0 to {brightness} % ")
     set_color_brightness(device_address, color=0, brightness=brightness)
 
 
-@app.command()
+@app.command(name="set-rgb-brightness")
 def set_rgb_brightness(
-    device_address: str, brightness: Annotated[tuple[int, int, int], typer.Argument()]
+    device_address: str, 
+    brightness: Annotated[List[int], typer.Argument(min=0, max=140, help="Parameter list, e.g. 0 0 0 or 0")],
 ) -> None:
     """Set brightness of a RGB light."""
-    _run_device_func(device_address, brightness=brightness)
+    print(f"Connect to device {device_address} and set RBG to {brightness} % ")
+    _run_device_func(device_address, 
+                     brightness=brightness)
 
 
-@app.command()
+@app.command(name="add-setting")
 def add_setting(
     device_address: str,
     sunrise: Annotated[datetime, typer.Argument(formats=["%H:%M"])],
@@ -111,6 +115,7 @@ def add_setting(
     weekdays: Annotated[list[WeekdaySelect], typer.Option()] = [WeekdaySelect.everyday],
 ) -> None:
     """Add setting to a light."""
+    print(f"Connect to device ....")
     _run_device_func(
         device_address,
         sunrise=sunrise,
@@ -121,7 +126,7 @@ def add_setting(
     )
 
 
-@app.command()
+@app.command(name="add-rgb-setting")
 def add_rgb_setting(
     device_address: str,
     sunrise: Annotated[datetime, typer.Argument(formats=["%H:%M"])],
@@ -131,6 +136,7 @@ def add_rgb_setting(
     weekdays: Annotated[list[WeekdaySelect], typer.Option()] = [WeekdaySelect.everyday],
 ) -> None:
     """Add setting to a RGB light."""
+    print(f"Connect to device ....")
     _run_device_func(
         device_address,
         sunrise=sunrise,
@@ -141,7 +147,7 @@ def add_rgb_setting(
     )
 
 
-@app.command()
+@app.command(name="remove-setting")
 def remove_setting(
     device_address: str,
     sunrise: Annotated[datetime, typer.Argument(formats=["%H:%M"])],
@@ -150,6 +156,7 @@ def remove_setting(
     weekdays: Annotated[list[WeekdaySelect], typer.Option()] = [WeekdaySelect.everyday],
 ) -> None:
     """Remove setting from a light."""
+    print(f"Connect to device ....")
     _run_device_func(
         device_address,
         sunrise=sunrise,
@@ -159,15 +166,17 @@ def remove_setting(
     )
 
 
-@app.command()
+@app.command(name="reset-settings")
 def reset_settings(device_address: str) -> None:
     """Reset settings from a light."""
+    print(f"Connect to device ....")
     _run_device_func(device_address)
 
 
-@app.command()
+@app.command(name="enable-auto-mode")
 def enable_auto_mode(device_address: str) -> None:
     """Enable auto mode in a light."""
+    print(f"Connect to device ....")
     _run_device_func(device_address)
 
 

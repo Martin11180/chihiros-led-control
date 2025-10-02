@@ -12,18 +12,18 @@ from ..main.exception import DeviceNotFound
 from ..main.base_device import BaseDevice
 
 # Import all known model classes so they are present in this module's namespace
-from .a2 import AII
-from .c2 import CII
-from .c2rgb import CIIRGB
+from .LED.a2 import AII
+from .LED.c2 import CII
+from .RGB.c2rgb import CIIRGB
 from .fallback import Fallback
-from .tiny_terrarium_egg import TinyTerrariumEgg
-from .wrgb2 import WRGBII
-from .wrgb2_slim import WRGBIISlim
-from .z_light_tiny import ZLightTiny
-from ...chihiros_led_ch4_control.device.commander1 import Commander1
-from ...chihiros_led_ch4_control.device.commander4 import Commander4
-from ...chihiros_led_ch4_control.device.wrgb2_pro import WRGBIIPro
-from ...chihiros_led_ch4_control.device.universal_wrgb import UniversalWRGB
+from .TINY.tiny_terrarium_egg import TinyTerrariumEgg
+from .WRGB.wrgb2 import WRGBII
+from .WRGB.wrgb2_slim import WRGBIISlim
+from .TINY.z_light_tiny import ZLightTiny
+from .commander1 import Commander1
+from .commander4 import Commander4
+from .WRGB.wrgb2_pro import WRGBIIPro
+from .WRGB.universal_wrgb import UniversalWRGB
 
 # NEW: include the doser stub so discovery resolves to "Doser" instead of "fallback"
 from ...chihiros_doser_control.device.doser import Doser  # make sure this file exists with _model_codes like ["DYDOSED2", "DYDOSED", "DYDOSE"]

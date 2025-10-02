@@ -1,6 +1,6 @@
 """WRGB II device Model."""
 
-from ..main.base_device import BaseDevice
+from ...main.base_device import BaseDevice
 
 
 class WRGBII(BaseDevice):
