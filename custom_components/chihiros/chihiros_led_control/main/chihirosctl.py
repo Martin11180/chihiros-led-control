@@ -12,19 +12,24 @@ from rich import print
 from rich.table import Table
 from typing_extensions import Annotated
 
-from . import commands
+from ...chihiros_led_control.main import ctl_command as ctl_cmd
+from ...chihiros_led_control.main import msg_command as msg_cmd
+from ...chihiros_template_control.main import storage_containers as sc
 from ..device import get_device_from_address, get_model_class_from_name
 from ....helper.weekday_encoding import WeekdaySelect
 
 # Mount the doser Typer app under "doser"
 # (use the thin shim so the import path stays stable)
 from ...chihiros_doser_control.main.chihirosdoserctl import app as doser_app
+from ...chihiros_template_control.main.chihirostemplatectl import app as template_app
 from ...helper.main.debugctl import app as debug_app
 
 app = typer.Typer()
 app.add_typer(doser_app, name="doser", help="Chihiros doser control")
+app.add_typer(template_app, name="template", help="Chihiros template control")
 app.add_typer(debug_app, help="Chihiros debug control")
-msg_id = commands.next_message_id()
+
+msg_id = msg_cmd.next_message_id()
 
 
 def _run_device_func(device_address: str, **kwargs: Any) -> None:
@@ -49,16 +54,23 @@ def list_devices(timeout: Annotated[int, typer.Option()] = 5) -> None:
     print("the search for Bluetooth devices is running")
     table = Table("Name", "Address", "Model")
     discovered_devices = asyncio.run(BleakScanner.discover(timeout=timeout))
-    for device in discovered_devices:
+    
+    chd = []
+    for idx, device in enumerate(discovered_devices):
         name = device.name or ""
         model_name = "???"
         if name:
             model_class = get_model_class_from_name(name)
             # Use safe getattr so we don't assume any class attributes exist
             model_name = getattr(model_class, "model_name", "???") or "???"
-        table.add_row(name or "(unknown)", device.address, model_name)
+            if not model_name == "???" and not model_name == "fallback":
+               test = [device.address, str(model_name), str(name)]
+               chd.insert(idx, test)
+            table.add_row(name or "(unknown)", device.address, model_name)
+    
     print("Discovered the following devices:")
     print(table)
+    sc.set_template_device_trusted(chd)
 
 
 @app.command(name="turn-on")

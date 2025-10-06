@@ -1,8 +1,12 @@
 """Module defining commands generation functions."""
 
+import asyncio
+import inspect
 import datetime
-from .ctl_command import *
- 
+from typing import Any, Optional, Union, List
+from bleak.backends.device import BLEDevice
+
+
 def next_message_id(current_msg_id: tuple[int, int] = (0, 0)) -> tuple[int, int]:
     """Generate bluetooth message id."""
     msg_id_higher_byte, msg_id_lower_byte = current_msg_id

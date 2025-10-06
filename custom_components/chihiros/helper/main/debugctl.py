@@ -12,7 +12,8 @@ from bleak.exc import BleakDeviceNotFoundError, BleakError
 
 # 👈 go up to the common LED package (shared BaseDevice, time sync, weekday utils)
 from ...chihiros_led_control.main.base_device import BaseDevice
-from ...chihiros_led_control.main import commands as led_cmds
+from ...chihiros_led_control.main import msg_command as msg_cmd
+from ...chihiros_led_control.main import ctl_command as ctl_cmd
 from ....helper.weekday_encoding import (
     WeekdaySelect,
     encode_selected_weekdays,

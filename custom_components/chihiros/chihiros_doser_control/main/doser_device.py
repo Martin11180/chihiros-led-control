@@ -12,7 +12,8 @@ from bleak.exc import BleakDeviceNotFoundError, BleakError
 
 # 👈 go up to the common LED package (shared BaseDevice, time sync, weekday utils)
 from ...chihiros_led_control.main.base_device import BaseDevice
-from ...chihiros_led_control.main import commands as led_cmds
+from ...chihiros_led_control.main import msg_command as msg_cmd
+from ...chihiros_led_control.main import ctl_command as ctl_cmd
 from ....helper.weekday_encoding import (
     WeekdaySelect,
     encode_selected_weekdays,
@@ -79,8 +80,8 @@ class DoserDevice(BaseDevice):
         """
         prelude = [
             dosingpump.create_order_confirmation(self.get_next_msg_id(), 90, 4, 1),
-            led_cmds.create_set_time_command(self.get_next_msg_id()),
-            led_cmds.create_set_time_command(self.get_next_msg_id()),
+            ctl_cmd.create_set_time_command(self.get_next_msg_id()),
+            ctl_cmd.create_set_time_command(self.get_next_msg_id()),
             dosingpump.create_order_confirmation(self.get_next_msg_id(), 165, 4, 4),
             dosingpump.create_order_confirmation(self.get_next_msg_id(), 165, 4, 5),
             dosingpump.create_switch_to_auto_mode_dosing_pump_command(self.get_next_msg_id(), ch_id),
@@ -102,7 +103,7 @@ class DoserDevice(BaseDevice):
 
     async def enable_auto_mode_dosing_pump(self, ch_id: int) -> None:
         switch_cmd = dosingpump.create_switch_to_auto_mode_dosing_pump_command(self.get_next_msg_id(), ch_id)
-        time_cmd = led_cmds.create_set_time_command(self.get_next_msg_id())
+        time_cmd = ctl_cmd.create_set_time_command(self.get_next_msg_id())
         await self._send_command(switch_cmd, 3)
         await self._send_command(time_cmd, 3)
 
