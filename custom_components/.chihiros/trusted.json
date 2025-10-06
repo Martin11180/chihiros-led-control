@@ -1,15 +1,15 @@
 {
    "trusted": {
-      "D5:41:68:57:77:7E": {
-         "model_name": "DYU1000D5416857777E",
+      "00:00:00:00:00:03": {
+         "model_name": "DYU1000000000000001",
          "model_short": "Universal WRGB"
       },
-      "F6:04:53:29:C3:F0": {
-         "model_name": "DYDOSEF6045329C3F0",
+      "00:00:00:00:00:02": {
+         "model_name": "DYDOSE00000000000002",
          "model_short": "Doser"
       },
-      "FF:D2:2C:EB:9A:E2": {
-         "model_name": "DYU1000FFD22CEB9AE2",
+      "00:00:00:00:00:01": {
+         "model_name": "DYU000000000000001",
          "model_short": "Universal WRGB"
       }
    }
