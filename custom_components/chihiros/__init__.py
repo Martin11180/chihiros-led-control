@@ -37,7 +37,15 @@ async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool
     from homeassistant.const import Platform
     from homeassistant.exceptions import ConfigEntryNotReady
 
+    from homeassistant.const import CONF_NAME
+
     from .chihiros_led_control.device import BaseDevice, get_model_class_from_name
+    from .chihiros_led_control.device.commander1 import Commander1
+    from .chihiros_led_control.device.commander4 import Commander4
+    from .chihiros_led_control.device.fallback import Fallback
+    from .chihiros_led_control.device.generic_rgb import GenericRGB
+    from .chihiros_led_control.device.generic_white import GenericWhite
+    from .chihiros_led_control.device.generic_wrgb import GenericWRGB
     from .coordinator import ChihirosDataUpdateCoordinator
     from .models import ChihirosData
     # IMPORTANT: import doser services here (not at module import time)
@@ -57,6 +65,25 @@ async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool
 
     model_class = get_model_class_from_name(ble_device.name)
     chihiros_device: BaseDevice = model_class(ble_device)  # type: ignore[call-arg]
+
+    # If fallback or commander device, allow user-provided name and device_type (white/rgb/wrgb)
+    if isinstance(chihiros_device, (Fallback, Commander1, Commander4)):
+        # Apply name override if provided
+        entry_name = entry.data.get(CONF_NAME)
+        if entry_name:
+            # Some BLEDevice implementations allow setting name attribute
+            try:
+                ble_device.name = entry_name
+            except Exception:
+                pass
+        # Configure colors based on device_type
+        device_type = entry.data.get("device_type")
+        if device_type == "rgb":
+            chihiros_device = GenericRGB(ble_device)
+        elif device_type == "wrgb":
+            chihiros_device = GenericWRGB(ble_device)
+        else:
+            chihiros_device = GenericWhite(ble_device)
 
     coordinator = ChihirosDataUpdateCoordinator(
         hass,
