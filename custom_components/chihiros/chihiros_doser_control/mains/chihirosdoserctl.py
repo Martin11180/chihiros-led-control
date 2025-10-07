@@ -8,52 +8,39 @@ and *extends the same app instance* with a few extra helper commands.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, time, timedelta
-from typing import List, Optional
+from datetime import datetime
+from typing import List
 
 import typer
 from typing_extensions import Annotated
-from bleak import BleakScanner
-from bleak.backends.device import BLEDevice
 from bleak.exc import BleakDeviceNotFoundError, BleakError
 
-# 👈 go up to the common LED package (shared BaseDevice, time sync, weekday utils)
-from ...chihiros_led_control.device.base_device import BaseDevice
-from ...chihiros_led_control import commands as led_cmds
+# Weekday helpers (shared with LED package)
 from ...chihiros_led_control.weekday_encoding import (
     WeekdaySelect,
     encode_selected_weekdays,
 )
 
-# Import the existing doser CLI app and (optionally) the device class
+# Import the existing doser CLI app and the device class
 from .doser_device import app as app
-from .doser_device import DoserDevice , _resolve_ble_or_fail# used by the extra helpers below
+from .doser_device import DoserDevice, _resolve_ble_or_fail  # used by helpers
+
+# Protocol bits for utilities / probes / decode→state→ctl
+from ..protocol import (
+    UART_TX,
+    UART_RX,
+    build_totals_query_5b,
+    parse_totals_frame,
+    parse_log_blob,
+    decode_records,
+    build_device_state,
+    to_ctl_lines,
+)
 
 
 # ────────────────────────────────────────────────────────────────
 # Helpers
 # ────────────────────────────────────────────────────────────────
-
-def _parse_params_tokens(tokens: List[str]) -> List[int]:
-    """
-    Accept decimal or hex tokens:
-      - decimal: 10, 255
-      - hex: 0x0A, 0Ah
-    """
-    out: List[int] = []
-    for t in tokens:
-        s = t.strip().lower()
-        if s.startswith("0x"):
-            v = int(s, 16)
-        elif s.endswith("h") and all(c in "0123456789abcdef" for c in s[:-1]):
-            v = int(s[:-1], 16)
-        else:
-            v = int(s, 10)
-        if not (0 <= v <= 255):
-            raise typer.BadParameter(f"Parameter byte out of range 0..255: {t}")
-        out.append(v)
-    return out
-
 
 def _parse_hex_blob(blob: str) -> bytes:
     s = "".join(blob.strip().split())
@@ -77,7 +64,7 @@ def bytes_encode(
 ) -> None:
     """
     Pretty-print an A5/5B frame and (if 8 params) decode 4 channels of daily totals
-    using the 25.6 bucket + 0.1 mL scheme.
+    using the 25.6 bucket + 0.1 mL scheme (LED-style 0x5B totals).
     """
     value_bytes = _parse_hex_blob(params)
 
@@ -97,9 +84,9 @@ def bytes_encode(
     # Determine param length per protocol family
     total_after_header = max(0, len(value_bytes) - 7)
     if isinstance(length_fld, int):
-        if cmd_id in (0x5B, 91):         # LED-style
+        if cmd_id in (0x5B, 91):           # LED-style
             param_len = max(0, length_fld - 2)
-        else:                             # A5-style (doser)
+        else:                               # A5-style (doser)
             param_len = max(0, length_fld - 5)
     else:
         param_len = total_after_header
@@ -113,7 +100,7 @@ def bytes_encode(
     checksum     = value_bytes[-1] if len(value_bytes) >= 1 else "????"
 
     try:
-        # PrettyTable is optional; fall back to plain output if missing
+        # PrettyTable is optional; fallback to plain output if missing
         from prettytable import PrettyTable, SINGLE_BORDER  # type: ignore
         table_obj = PrettyTable()
         table_obj.set_style(SINGLE_BORDER)
@@ -133,7 +120,7 @@ def bytes_encode(
             str(params_list),
             str(checksum),
         ])
-        print(table_obj)  # rich.print
+        print(table_obj)
     except Exception:
         # Fallback (no prettytable)
         typer.echo("Encode Message")
@@ -154,9 +141,48 @@ def bytes_encode(
 
         mls = [decode_ml_25_6(params_list[i], params_list[i + 1]) for i in range(0, 8, 2)]
         typer.echo(
-            f"Decoded daily totals (ml): ch0={mls[0]:.2f}, ch1={mls[1]:.2f}, "
-            f"ch2={mls[2]:.2f}, ch3={mls[3]:.2f}"
+            f"Decoded daily totals (ml): "
+            f"CH1={mls[0]:.2f}, CH2={mls[1]:.2f}, CH3={mls[2]:.2f}, CH4={mls[3]:.2f}"
         )
+
+
+# ────────────────────────────────────────────────────────────────
+# BYTES DECODE — parse captured “Encode Message …” blocks to CTL lines
+# ────────────────────────────────────────────────────────────────
+
+@app.command(name="bytes-decode")
+def bytes_decode_to_ctl(
+    file_path: Annotated[str, typer.Argument(help="Path to a text file with 'Encode Message …' blocks or JSON lines")],
+    print_raw: Annotated[bool, typer.Option("--raw/--no-raw", help="Also print decoded JSON rows")] = False,
+) -> None:
+    """
+    Parse a log blob (mixed 'Encode Message' blocks and/or JSON lines) and print:
+      • optional decoded JSON events
+      • coalesced CTL key=value lines (one per channel/device field)
+    """
+    try:
+        text = open(file_path, "r", encoding="utf-8").read()
+    except OSError as e:
+        raise typer.BadParameter(f"Could not read file: {e}") from e
+
+    recs = parse_log_blob(text)
+    if not recs:
+        typer.echo("No records parsed.")
+        raise typer.Exit(2)
+
+    dec = decode_records(recs)
+    if print_raw:
+        import json as _json
+        typer.echo(_json.dumps(dec, indent=2))
+
+    state = build_device_state(dec)
+    lines = to_ctl_lines(state)
+    if not lines:
+        typer.echo("No CTL lines produced.")
+        raise typer.Exit(1)
+
+    for ln in lines:
+        typer.echo(ln)
 
 
 # ────────────────────────────────────────────────────────────────
@@ -198,7 +224,7 @@ def read_dosing_container(
 @app.command("set-dosing-pump-manuell-ml")
 def cli_set_dosing_pump_manuell_ml(
     device_address: Annotated[str, typer.Argument(help="BLE MAC, e.g. AA:BB:CC:DD:EE:FF")],
-    ch_id: Annotated[int, typer.Option("--ch-id", help="Channel 0..3", min=0, max=3)],
+    ch_id: Annotated[int, typer.Option("--ch-id", help="Channel 0..3 (0≙CH1)", min=0, max=3)],
     ch_ml: Annotated[float, typer.Option("--ch-ml", help="Dose (mL)", min=0.2, max=999.9)],
 ):
     """Immediate one-shot dose."""
@@ -208,8 +234,8 @@ def cli_set_dosing_pump_manuell_ml(
             ble = await _resolve_ble_or_fail(device_address)
             dd = DoserDevice(ble)
             await dd.set_dosing_pump_manuell_ml(ch_id, ch_ml)
-        except (BleakDeviceNotFoundError, BleakError, OSError) as ex:
-            _handle_connect_errors(ex)
+        except (BleakDeviceNotFoundError, BleakError, OSError):
+            raise
         finally:
             if dd:
                 await dd.disconnect()
@@ -219,7 +245,7 @@ def cli_set_dosing_pump_manuell_ml(
 @app.command("enable-auto-mode-dosing-pump")
 def cli_enable_auto_mode_dosing_pump(
     device_address: Annotated[str, typer.Argument(help="BLE MAC")],
-    ch_id: Annotated[int, typer.Option("--ch-id", help="Channel 0..3", min=0, max=3)] = 0,
+    ch_id: Annotated[int, typer.Option("--ch-id", help="Channel 0..3 (0≙CH1)", min=0, max=3)] = 0,
 ):
     """Explicitly switch the doser channel to auto mode and sync time."""
     async def run():
@@ -228,8 +254,8 @@ def cli_enable_auto_mode_dosing_pump(
             ble = await _resolve_ble_or_fail(device_address)
             dd = DoserDevice(ble)
             await dd.enable_auto_mode_dosing_pump(ch_id)
-        except (BleakDeviceNotFoundError, BleakError, OSError) as ex:
-            _handle_connect_errors(ex)
+        except (BleakDeviceNotFoundError, BleakError, OSError):
+            raise
         finally:
             if dd:
                 await dd.disconnect()
@@ -240,7 +266,7 @@ def cli_enable_auto_mode_dosing_pump(
 def cli_add_setting_dosing_pump(
     device_address: Annotated[str, typer.Argument(help="BLE MAC")],
     performance_time: Annotated[datetime, typer.Argument(formats=["%H:%M"], help="HH:MM")],
-    ch_id: Annotated[int, typer.Option("--ch-id", help="Channel 0..3", min=0, max=3)],
+    ch_id: Annotated[int, typer.Option("--ch-id", help="Channel 0..3 (0≙CH1)", min=0, max=3)],
     ch_ml: Annotated[float, typer.Option("--ch-ml", help="Daily dose mL", min=0.2, max=999.9)],
     weekdays: Annotated[List[WeekdaySelect], typer.Option(
         "--weekdays", "-w", help="Repeat days; can be passed multiple times", case_sensitive=False
@@ -255,13 +281,80 @@ def cli_add_setting_dosing_pump(
             mask = encode_selected_weekdays(weekdays)
             tenths = int(round(ch_ml * 10))
             await dd.add_setting_dosing_pump(performance_time.time(), ch_id, mask, tenths)
-        except (BleakDeviceNotFoundError, BleakError, OSError) as ex:
-            _handle_connect_errors(ex)
+        except (BleakDeviceNotFoundError, BleakError, OSError):
+            raise
         finally:
             if dd:
                 await dd.disconnect()
     asyncio.run(run())
 
+
+# ────────────────────────────────────────────────────────────────
+# Probe: send a 0x5B totals query and print decoded totals
+# ────────────────────────────────────────────────────────────────
+
+@app.command("probe-totals")
+def cli_probe_totals(
+    device_address: Annotated[str, typer.Argument(help="BLE MAC, e.g. AA:BB:CC:DD:EE:FF")],
+    timeout_s: Annotated[float, typer.Option(help="Listen timeout seconds", min=0.5)] = 6.0,
+    mode_5b: Annotated[int, typer.Option(help="0x5B mode to use (e.g. 0x22 or 0x1E)")] = 0x22,
+) -> None:
+    """
+    Send a LED-style (0x5B) totals request and print CH1..CH4 totals (mL) if received.
+    """
+    async def run():
+        dd: DoserDevice | None = None
+        got: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
+
+        def _on_notify(_char, payload: bytearray) -> None:
+            # Accept first parseable totals frame
+            vals = parse_totals_frame(payload)
+            if vals and not got.done():
+                got.set_result(bytes(payload))
+
+        try:
+            ble = await _resolve_ble_or_fail(device_address)
+            dd = DoserDevice(ble)
+            client = await dd.connect()  # ensure connected; DoserDevice should return a Bleak client
+            await client.start_notify(UART_TX, _on_notify)
+
+            frame = build_totals_query_5b(mode_5b)
+            # Most firmwares take writes on RX, but some echo off TX; try RX first.
+            try:
+                await client.write_gatt_char(UART_RX, frame, response=True)
+            except Exception:
+                # Fallback to TX if RX rejects writes on this device
+                await client.write_gatt_char(UART_TX, frame, response=True)
+
+            try:
+                payload = await asyncio.wait_for(got, timeout=timeout_s)
+                vals = parse_totals_frame(payload) or []
+                if len(vals) >= 4:
+                    typer.echo(
+                        f"Totals (ml): CH1={vals[0]:.2f}, CH2={vals[1]:.2f}, "
+                        f"CH3={vals[2]:.2f}, CH4={vals[3]:.2f}"
+                    )
+                else:
+                    typer.echo("Totals received but could not parse 4 channels.")
+            except asyncio.TimeoutError:
+                typer.echo("No totals frame received within timeout.")
+            finally:
+                try:
+                    await client.stop_notify(UART_TX)
+                except Exception:
+                    pass
+        except (BleakDeviceNotFoundError, BleakError, OSError):
+            raise
+        finally:
+            if dd:
+                await dd.disconnect()
+
+    asyncio.run(run())
+
+
+# ────────────────────────────────────────────────────────────────
+# Raw A5 frame sender
+# ────────────────────────────────────────────────────────────────
 
 @app.command("raw-dosing-pump")
 def cli_raw_dosing_pump(
@@ -279,8 +372,8 @@ def cli_raw_dosing_pump(
             ble = await _resolve_ble_or_fail(device_address)
             dd = DoserDevice(ble)
             await dd.raw_dosing_pump(cmd_id, mode, params, repeats)
-        except (BleakDeviceNotFoundError, BleakError, OSError) as ex:
-            _handle_connect_errors(ex)
+        except (BleakDeviceNotFoundError, BleakError, OSError):
+            raise
         finally:
             if dd:
                 await dd.disconnect()
