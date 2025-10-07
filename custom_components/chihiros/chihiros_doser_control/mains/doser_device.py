@@ -19,7 +19,7 @@ from ...chihiros_led_control.weekday_encoding import (
 )
 
 # 👇 these live in the doser package root (one level up from /device)
-from ..mains import dosingpump
+from .. import dosingpump
 from ..protocol import (
     _split_ml_25_6,
     UART_TX,

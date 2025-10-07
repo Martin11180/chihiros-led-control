@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import time
 from typing import List, Tuple
 
-from ...chihiros_led_control import commands
-from ..protocol import _split_ml_25_6  # same 25.6 + 0.1 encoder used elsewhere
+from ..chihiros_led_control import commands
+from .protocol import _split_ml_25_6  # use the same 25.6+0.1 encoder
 
 # ────────────────────────────────────────────────────────────────
 # Byte helpers

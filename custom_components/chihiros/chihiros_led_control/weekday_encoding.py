@@ -1,4 +1,4 @@
-"""Module helping for weeday encoding."""
+"""Module helping for weekday encoding."""
 
 from enum import Enum
 
