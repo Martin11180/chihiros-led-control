@@ -29,7 +29,8 @@ from .wrgb2_slim import WRGBIISlim
 from .z_light_tiny import ZLightTiny
 
 # NEW: include the doser stub so discovery resolves to "Doser" instead of "fallback"
-from .doser import Doser  # make sure this file exists with _model_codes like ["DYDOSED2", "DYDOSED", "DYDOSE"]
+from ...chihiros_doser_control.device.doser import Doser  # make sure this file exists with _model_codes like ["DYDOSED2", "DYDOSED", "DYDOSE"]
+
 
 # Build a mapping of MODEL_CODE -> class by introspecting imported classes
 CODE2MODEL: dict[str, Type[BaseDevice]] = {}
