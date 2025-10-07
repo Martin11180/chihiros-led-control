@@ -43,9 +43,9 @@ async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool
     from .chihiros_led_control.device.commander1 import Commander1
     from .chihiros_led_control.device.commander4 import Commander4
     from .chihiros_led_control.device.fallback import Fallback
-    from .chihiros_led_control.device.generic_rgb import GenericRGB
-    from .chihiros_led_control.device.generic_white import GenericWhite
-    from .chihiros_led_control.device.generic_wrgb import GenericWRGB
+    from .chihiros_led_control.device.RGB.generic_rgb import GenericRGB
+    from .chihiros_led_control.device.LED.generic_white import GenericWhite
+    from .chihiros_led_control.device.WRGB.generic_wrgb import GenericWRGB
     from .coordinator import ChihirosDataUpdateCoordinator
     from .models import ChihirosData
     # IMPORTANT: import doser services here (not at module import time)

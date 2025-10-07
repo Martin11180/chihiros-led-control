@@ -24,11 +24,11 @@ try:
     )
 
     from ..const import DOMAIN  # integration domain
-    from . import protocol as dp  # provides dose_ml(client, channel, ml)
-    from .protocol import UART_TX  # notify UUID for totals frames
+    from .mains import protocol as dp  # provides dose_ml(client, channel, ml)
+    from .mains.protocol import UART_TX  # notify UUID for totals frames
 
     # human-friendly weekday handling using your existing encoding helper
-    from ..chihiros_led_control.weekday_encoding import (
+    from ..chihiros_led_control.helper.weekday_encoding import (
         WeekdaySelect,
         encode_selected_weekdays,
     )
