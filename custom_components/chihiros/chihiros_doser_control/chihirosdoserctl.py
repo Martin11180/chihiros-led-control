@@ -196,11 +196,14 @@ def read_dosing_auto(
     timeout_s: Annotated[float, typer.Option(help="Timeout seconds", min=0.1)] = 2.0,
 ) -> None:
     async def run():
-        dd = DoserDevice(device_address)
+        dd: DoserDevice | None = None
         try:
+            ble = await _resolve_ble_or_fail(device_address)     # << use helper
+            dd = DoserDevice(ble)                                # << pass BLEDevice
             await dd.read_dosing_pump_auto_settings(ch_id=ch_id, timeout_s=timeout_s)
         finally:
-            await dd.disconnect()
+            if dd:
+                await dd.disconnect()
     import asyncio as _asyncio
     _asyncio.run(run())
 
@@ -212,11 +215,14 @@ def read_dosing_container(
     timeout_s: Annotated[float, typer.Option(help="Timeout seconds", min=0.1)] = 2.0,
 ) -> None:
     async def run():
-        dd = DoserDevice(device_address)
+        dd: DoserDevice | None = None
         try:
+            ble = await _resolve_ble_or_fail(device_address)     # << use helper
+            dd = DoserDevice(ble)                                # << pass BLEDevice
             await dd.read_dosing_container_status(ch_id=ch_id, timeout_s=timeout_s)
         finally:
-            await dd.disconnect()
+            if dd:
+                await dd.disconnect()
     import asyncio as _asyncio
     _asyncio.run(run())
 
@@ -315,7 +321,7 @@ def cli_probe_totals(
         try:
             ble = await _resolve_ble_or_fail(device_address)
             dd = DoserDevice(ble)
-            client = await dd.connect()  # ensure connected; DoserDevice should return a Bleak client
+            client = await dd.connect()  # ensure connected
             await client.start_notify(UART_TX, _on_notify)
 
             frame = build_totals_query_5b(mode_5b)
@@ -323,7 +329,6 @@ def cli_probe_totals(
             try:
                 await client.write_gatt_char(UART_RX, frame, response=True)
             except Exception:
-                # Fallback to TX if RX rejects writes on this device
                 await client.write_gatt_char(UART_TX, frame, response=True)
 
             try:
