@@ -28,9 +28,12 @@ from .wrgb2_pro import WRGBIIPro
 from .wrgb2_slim import WRGBIISlim
 from .z_light_tiny import ZLightTiny
 
-# NEW: include the doser stub so discovery resolves to "Doser" instead of "fallback"
-from ...chihiros_doser_control.device.doser import Doser  # make sure this file exists with _model_codes like ["DYDOSED2", "DYDOSED", "DYDOSE"]
-
+# Try to include the doser model; skip gracefully if unavailable
+try:
+    # sibling package under custom_components.chihiros
+    from ...chihiros_doser_control.device.doser import Doser  # noqa: F401
+except Exception:
+    Doser = None  # type: ignore[assignment]
 
 # Build a mapping of MODEL_CODE -> class by introspecting imported classes
 CODE2MODEL: dict[str, Type[BaseDevice]] = {}
@@ -39,7 +42,6 @@ for _name, _obj in inspect.getmembers(sys.modules[__name__]):
         for _code in getattr(_obj, "_model_codes", []):
             if isinstance(_code, str) and _code:
                 CODE2MODEL[_code.upper()] = _obj
-
 
 def get_model_class_from_name(device_name: str) -> Type[BaseDevice]:
     """Return the device class for a given BLE advertised name.
@@ -64,7 +66,6 @@ def get_model_class_from_name(device_name: str) -> Type[BaseDevice]:
             best_len = len(code)
     return best_cls or Fallback
 
-
 async def get_device_from_address(device_address: str) -> BaseDevice:
     """Instantiate the correct device class from a MAC address."""
     ble_dev = await BleakScanner.find_device_by_address(device_address)
@@ -72,7 +73,6 @@ async def get_device_from_address(device_address: str) -> BaseDevice:
         model_class = get_model_class_from_name(ble_dev.name)
         return model_class(ble_dev)
     raise DeviceNotFound
-
 
 __all__ = [
     "ZLightTiny",

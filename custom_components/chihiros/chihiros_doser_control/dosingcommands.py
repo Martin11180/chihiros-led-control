@@ -1,4 +1,4 @@
-from __future__ import annotations
+from __future__ import annotations 
 
 from datetime import time
 from typing import List, Tuple
@@ -178,3 +178,61 @@ def create_order_confirmation(
 def create_reset_auto_settings_command(msg_id: tuple[int, int]) -> bytearray:
     """Reset auto settings (semantics are firmware-dependent)."""
     return _create_command_encoding_dosing_pump(90, 5, msg_id, [5, 255, 255])
+
+
+# ────────────────────────────────────────────────────────────────
+# NEW: Dual schedule variants to support more firmware flavors
+#     (adds without replacing your existing API)
+# ────────────────────────────────────────────────────────────────
+
+def create_schedule_weekly_byte_amount(
+    performance_time: time,
+    msg_id: tuple[int, int],
+    ch_id: int,
+    weekdays_mask: int,
+    daily_ml_tenths: int,  # 0..255 (0.0..25.5 mL if strictly one byte)
+    enabled: bool = True,
+) -> bytearray:
+    """
+    Variant A (single-byte dose×10 inside 0x1B):
+      0x1B / 27 : [ch, weekday_mask, enable, HH, MM, dose_x10]
+    Keeps your existing “dose_x10” layout intact for firmwares that expect it.
+    """
+    _clamp_byte(ch_id)
+    _clamp_byte(weekdays_mask & 0x7F)
+    _clamp_byte(performance_time.hour)
+    _clamp_byte(performance_time.minute)
+    dose10 = int(daily_ml_tenths)
+    if not (0 <= dose10 <= 255):
+        raise ValueError("daily_ml_tenths must be 0..255 for byte-based variant")
+    return _create_command_encoding_dosing_pump(
+        165, 27, msg_id, [ch_id, weekdays_mask & 0x7F, 1 if enabled else 0,
+                          performance_time.hour, performance_time.minute, dose10]
+    )
+
+def create_schedule_weekly_hi_lo(
+    performance_time: time,
+    msg_id_time: tuple[int, int],
+    msg_id_amount: tuple[int, int],
+    ch_id: int,
+    weekdays_mask: int,
+    daily_ml: float,
+    enabled: bool = True,
+) -> list[bytearray]:
+    """
+    Variant B (time in 0x15, amount as hi/lo in 0x1B):
+      0x15 / 21 : [ch, enable, HH, MM, 0, 0]
+      0x1B / 27 : [ch, weekday_mask, enable, 0, ml_hi(25.6), ml_lo(0.1)]
+    Returns the two frames in order. Helpful for doses > 25.5 mL or firmwares
+    that expect the split-amount layout.
+    """
+    _clamp_byte(ch_id)
+    _clamp_byte(weekdays_mask & 0x7F)
+    _clamp_byte(performance_time.hour)
+    _clamp_byte(performance_time.minute)
+    hi, lo = _split_ml_25_6(daily_ml)
+    f_time = create_auto_mode_dosing_pump_command_time(performance_time, msg_id_time, ch_id, enabled=enabled)
+    f_amount = _create_command_encoding_dosing_pump(
+        165, 27, msg_id_amount, [ch_id, weekdays_mask & 0x7F, 1 if enabled else 0, 0, hi, lo]
+    )
+    return [f_time, f_amount]
