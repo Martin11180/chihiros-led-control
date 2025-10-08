@@ -71,6 +71,7 @@ def _mk_ble_device(addr_or_ble: Union[BLEDevice, str]) -> BLEDevice:
     # Bleak 1.x ctor: BLEDevice(address, name, details)
     return BLEDevice(mac, None, 0)  # or BLEDevice(mac, None, None)
 
+
 class BaseDevice(ABC):
     """Base device class used by device classes."""
 
@@ -463,6 +464,19 @@ class BaseDevice(ABC):
                 await client.start_notify(self._read_char, self._notification_handler)  # type: ignore
             else:
                 raise CharacteristicMissingError("Failed to resolve UART characteristics")
+
+    # >>> Added public connect() and client accessor <<<
+    async def connect(self) -> BleakClientWithServiceCache:
+        """Establish a connection (idempotent) and return the Bleak client."""
+        await self._ensure_connected()
+        assert self._client is not None  # nosec
+        return self._client
+
+    @property
+    def client(self) -> BleakClientWithServiceCache | None:
+        """Return the current Bleak client (None if not connected)."""
+        return self._client
+    # <<< end additions >>>
 
     def _reset_disconnect_timer(self) -> None:
         """Reset disconnect timer."""
