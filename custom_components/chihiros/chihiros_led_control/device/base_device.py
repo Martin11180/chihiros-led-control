@@ -41,14 +41,39 @@ class _classproperty(property):
         return ret
 
 
+def _is_ha_runtime() -> bool:
+    """Best-effort check: are we imported under Home Assistant?"""
+    try:
+        import homeassistant  # type: ignore
+        return True
+    except Exception:
+        return False
+
+
 def _mk_ble_device(addr_or_ble: Union[BLEDevice, str]) -> BLEDevice:
-    """Create a BLEDevice from a MAC string if needed."""
+    """
+    Create/return a BLEDevice.
+
+    - If a BLEDevice is provided, return it as-is.
+    - If a MAC string is provided:
+        * In Home Assistant runtime: disallow (a real BLEDevice must be supplied
+          by the HA bluetooth layer), to avoid fabricating devices.
+        * In CLI/dev runtime: create a minimal BLEDevice with name=None so we
+          don’t get “MAC (MAC)” duplication in logs.
+    """
     if isinstance(addr_or_ble, BLEDevice):
         return addr_or_ble
-    # Normalize to uppercase; Bleak/HA usually store addresses uppercase.
-    mac = addr_or_ble.upper()
-    # BLEDevice(address, name, details=None, rssi=0) — details/rssi aren’t required for connection.
-    return BLEDevice(mac, mac, None, 0)
+
+    # If we are in HA, do NOT fabricate; HA passes a real BLEDevice.
+    if _is_ha_runtime():
+        raise RuntimeError(
+            "In Home Assistant, pass a real BLEDevice (not a MAC string)."
+        )
+
+    # CLI / dev usage: allow constructing a minimal BLEDevice
+    mac = str(addr_or_ble).upper()
+    # BLEDevice(address, name, details=None, rssi=0) — leave name=None intentionally.
+    return BLEDevice(mac, None, None, 0)
 
 
 class BaseDevice(ABC):
