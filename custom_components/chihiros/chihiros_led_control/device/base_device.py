@@ -6,7 +6,7 @@ import asyncio
 import logging
 from abc import ABC, ABCMeta
 from datetime import datetime
-from typing import Optional, Union
+from typing import Optional, Union, Callable
 
 import typer
 from bleak.backends.device import BLEDevice
@@ -98,6 +98,10 @@ class BaseDevice(ABC):
         self._connect_lock: asyncio.Lock = asyncio.Lock()
         self._expected_disconnect = False
         self.loop = asyncio.get_running_loop()
+        # Temporary notify listeners (fan-out)
+        self._extra_notify_callbacks: list[
+            Callable[[BleakGATTCharacteristic, bytearray], None]
+        ] = []
         assert self._model_name is not None
 
     # Base methods
@@ -382,6 +386,28 @@ class BaseDevice(ABC):
         # Too noisy as warning; keep as debug unless you are inspecting traffic.
         self._logger.debug("%s: Notification received: %s", self.name, data.hex(" ").upper())
 
+        # Fan-out to temporary listeners
+        for cb in tuple(self._extra_notify_callbacks):
+            try:
+                cb(_sender, data)
+            except Exception:
+                self._logger.debug("%s: notify callback raised", self.name, exc_info=True)
+
+    # Temporary notify listener management
+    def add_notify_callback(
+        self, cb: Callable[[BleakGATTCharacteristic, bytearray], None]
+    ) -> None:
+        if cb not in self._extra_notify_callbacks:
+            self._extra_notify_callbacks.append(cb)
+
+    def remove_notify_callback(
+        self, cb: Callable[[BleakGATTCharacteristic, bytearray], None]
+    ) -> None:
+        try:
+            self._extra_notify_callbacks.remove(cb)
+        except ValueError:
+            pass
+
     def _disconnected(self, client: BleakClientWithServiceCache) -> None:
         """Disconnected callback."""
         if self._expected_disconnect:
@@ -465,7 +491,7 @@ class BaseDevice(ABC):
             else:
                 raise CharacteristicMissingError("Failed to resolve UART characteristics")
 
-    # >>> Added public connect() and client accessor <<<
+    # >>> Public connect() and client accessor <<<
     async def connect(self) -> BleakClientWithServiceCache:
         """Establish a connection (idempotent) and return the Bleak client."""
         await self._ensure_connected()

@@ -198,8 +198,8 @@ def read_dosing_auto(
     async def run():
         dd: DoserDevice | None = None
         try:
-            ble = await _resolve_ble_or_fail(device_address)     # << use helper
-            dd = DoserDevice(ble)                                # << pass BLEDevice
+            ble = await _resolve_ble_or_fail(device_address)
+            dd = DoserDevice(ble)
             await dd.read_dosing_pump_auto_settings(ch_id=ch_id, timeout_s=timeout_s)
         finally:
             if dd:
@@ -217,8 +217,8 @@ def read_dosing_container(
     async def run():
         dd: DoserDevice | None = None
         try:
-            ble = await _resolve_ble_or_fail(device_address)     # << use helper
-            dd = DoserDevice(ble)                                # << pass BLEDevice
+            ble = await _resolve_ble_or_fail(device_address)
+            dd = DoserDevice(ble)
             await dd.read_dosing_container_status(ch_id=ch_id, timeout_s=timeout_s)
         finally:
             if dd:
@@ -307,13 +307,15 @@ def cli_probe_totals(
 ) -> None:
     """
     Send a LED-style (0x5B) totals request and print CH1..CH4 totals (mL) if received.
+
+    NOTE: We use BaseDevice's internal notify subscription and temporary callback
+    fan-out to avoid double start/stop issues on some backends (e.g., WinRT).
     """
     async def run():
         dd: DoserDevice | None = None
         got: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
 
         def _on_notify(_char, payload: bytearray) -> None:
-            # Accept first parseable totals frame
             vals = parse_totals_frame(payload)
             if vals and not got.done():
                 got.set_result(bytes(payload))
@@ -321,8 +323,10 @@ def cli_probe_totals(
         try:
             ble = await _resolve_ble_or_fail(device_address)
             dd = DoserDevice(ble)
-            client = await dd.connect()  # ensure connected
-            await client.start_notify(UART_TX, _on_notify)
+            client = await dd.connect()  # ensure connected; notifications already subscribed
+
+            # Add temporary listener
+            dd.add_notify_callback(_on_notify)
 
             frame = build_totals_query_5b(mode_5b)
             # Most firmwares take writes on RX, but some echo off TX; try RX first.
@@ -343,16 +347,15 @@ def cli_probe_totals(
                     typer.echo("Totals received but could not parse 4 channels.")
             except asyncio.TimeoutError:
                 typer.echo("No totals frame received within timeout.")
-            finally:
-                try:
-                    await client.stop_notify(UART_TX)
-                except Exception:
-                    pass
         except (BleakDeviceNotFoundError, BleakError, OSError):
             raise
         finally:
+            # Always remove the temporary listener and disconnect
             if dd:
-                await dd.disconnect()
+                try:
+                    dd.remove_notify_callback(_on_notify)
+                finally:
+                    await dd.disconnect()
 
     asyncio.run(run())
 
