@@ -302,20 +302,22 @@ def cli_add_setting_dosing_pump(
 @app.command("probe-totals")
 def cli_probe_totals(
     device_address: Annotated[str, typer.Argument(help="BLE MAC, e.g. AA:BB:CC:DD:EE:FF")],
-    timeout_s: Annotated[float, typer.Option(help="Listen timeout seconds", min=0.5)] = 6.0,
-    mode_5b: Annotated[int, typer.Option(help="0x5B mode to use (e.g. 0x22 or 0x1E)")] = 0x22,
+    timeout_s: Annotated[float, typer.Option(help="Listen timeout seconds", min=0.5)] = 8.0,
+    mode_5b: Annotated[int, typer.Option("--mode-5b", help="0x5B mode (e.g. 0x22 or 0x1E)")] = 0x22,
+    dump: Annotated[bool, typer.Option("--dump/--no-dump", help="Print every notification as hex")] = False,
 ) -> None:
     """
     Send a LED-style (0x5B) totals request and print CH1..CH4 totals (mL) if received.
-
-    NOTE: We use BaseDevice's internal notify subscription and temporary callback
-    fan-out to avoid double start/stop issues on some backends (e.g., WinRT).
+    Tries multiple write styles (RX/TX, with/without response). Use --dump to see all frames.
     """
     async def run():
         dd: DoserDevice | None = None
-        got: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
+        loop = asyncio.get_running_loop()
+        got: asyncio.Future[bytes] = loop.create_future()
 
         def _on_notify(_char, payload: bytearray) -> None:
+            if dump:
+                typer.echo(f"notif: {payload.hex(' ').upper()}")
             vals = parse_totals_frame(payload)
             if vals and not got.done():
                 got.set_result(bytes(payload))
@@ -323,18 +325,33 @@ def cli_probe_totals(
         try:
             ble = await _resolve_ble_or_fail(device_address)
             dd = DoserDevice(ble)
-            client = await dd.connect()  # ensure connected; notifications already subscribed
+            client = await dd.connect()  # BaseDevice subscribes internally
 
-            # Add temporary listener
+            # attach temporary sniffer
             dd.add_notify_callback(_on_notify)
 
             frame = build_totals_query_5b(mode_5b)
-            # Most firmwares take writes on RX, but some echo off TX; try RX first.
-            try:
-                await client.write_gatt_char(UART_RX, frame, response=True)
-            except Exception:
-                await client.write_gatt_char(UART_TX, frame, response=True)
 
+            async def _try_write(char, resp: bool) -> bool:
+                try:
+                    await client.write_gatt_char(char, frame, response=resp)
+                    return True
+                except Exception:
+                    return False
+
+            # try a few write styles commonly accepted by firmwares
+            tried_any = False
+            for char in (UART_RX, UART_TX):
+                for resp in (False, True):
+                    ok = await _try_write(char, resp)
+                    tried_any = tried_any or ok
+                    if ok:
+                        # wait a short moment after a successful write to avoid spamming
+                        await asyncio.sleep(0.05)
+
+            if not tried_any:
+                typer.echo("Write attempts failed on both RX and TX; device may be busy.")
+                # still wait in case the device echoes something
             try:
                 payload = await asyncio.wait_for(got, timeout=timeout_s)
                 vals = parse_totals_frame(payload) or []
@@ -347,10 +364,7 @@ def cli_probe_totals(
                     typer.echo("Totals received but could not parse 4 channels.")
             except asyncio.TimeoutError:
                 typer.echo("No totals frame received within timeout.")
-        except (BleakDeviceNotFoundError, BleakError, OSError):
-            raise
         finally:
-            # Always remove the temporary listener and disconnect
             if dd:
                 try:
                     dd.remove_notify_callback(_on_notify)

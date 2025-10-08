@@ -6,7 +6,7 @@ import asyncio
 import logging
 from abc import ABC, ABCMeta
 from datetime import datetime
-from typing import Optional, Union, Callable
+from typing import Callable, Optional, Union
 
 import typer
 from bleak.backends.device import BLEDevice
@@ -68,7 +68,8 @@ def _mk_ble_device(addr_or_ble: Union[BLEDevice, str]) -> BLEDevice:
         )
 
     mac = str(addr_or_ble).upper()
-    # Bleak 1.x ctor: BLEDevice(address, name, details)
+    # Bleak 1.x ctor signature on all backends we support: BLEDevice(address, name, details)
+    # Keep 'name=None' so Bleak doesn't think we have an advertised name.
     return BLEDevice(mac, None, 0)  # or BLEDevice(mac, None, None)
 
 
@@ -98,7 +99,7 @@ class BaseDevice(ABC):
         self._connect_lock: asyncio.Lock = asyncio.Lock()
         self._expected_disconnect = False
         self.loop = asyncio.get_running_loop()
-        # Temporary notify listeners (fan-out)
+        # Fan-out list for temporary notify subscribers (e.g., CLI probes)
         self._extra_notify_callbacks: list[
             Callable[[BleakGATTCharacteristic, bytearray], None]
         ] = []
@@ -131,14 +132,14 @@ class BaseDevice(ABC):
         return self._msg_id
 
     @_classproperty
-    def model_name(self) -> str | None:
+    def model_name(cls) -> str | None:  # type: ignore[override]
         """Get the model of the device."""
-        return self._model_name
+        return cls._model_name
 
     @_classproperty
-    def model_codes(self) -> list[str]:
+    def model_codes(cls) -> list[str]:  # type: ignore[override]
         """Return the model codes."""
-        return self._model_codes
+        return cls._model_codes
 
     @property
     def colors(self) -> dict[str, int]:
@@ -287,7 +288,6 @@ class BaseDevice(ABC):
 
     async def set_manual_mode(self) -> None:
         """Switch to manual mode by sending a manual mode command."""
-        # Set brightness to last known or default value for all colors (e.g., 100)
         for color_name in self._colors:
             await self.set_color_brightness(100, color_name)
 
@@ -383,15 +383,19 @@ class BaseDevice(ABC):
         self, _sender: BleakGATTCharacteristic, data: bytearray
     ) -> None:
         """Handle notification responses."""
-        # Too noisy as warning; keep as debug unless you are inspecting traffic.
-        self._logger.debug("%s: Notification received: %s", self.name, data.hex(" ").upper())
+        # Keep debug-level to avoid log spam.
+        self._logger.debug(
+            "%s: Notification received: %s", self.name, data.hex(" ").upper()
+        )
 
-        # Fan-out to temporary listeners
+        # Fan-out to any temporary listeners (e.g. CLI probes).
         for cb in tuple(self._extra_notify_callbacks):
             try:
                 cb(_sender, data)
             except Exception:
-                self._logger.debug("%s: notify callback raised", self.name, exc_info=True)
+                self._logger.debug(
+                    "%s: notify callback raised", self.name, exc_info=True
+                )
 
     # Temporary notify listener management
     def add_notify_callback(
@@ -491,7 +495,8 @@ class BaseDevice(ABC):
             else:
                 raise CharacteristicMissingError("Failed to resolve UART characteristics")
 
-    # >>> Public connect() and client accessor <<<
+    # Public helpers
+
     async def connect(self) -> BleakClientWithServiceCache:
         """Establish a connection (idempotent) and return the Bleak client."""
         await self._ensure_connected()
@@ -502,7 +507,6 @@ class BaseDevice(ABC):
     def client(self) -> BleakClientWithServiceCache | None:
         """Return the current Bleak client (None if not connected)."""
         return self._client
-    # <<< end additions >>>
 
     def _reset_disconnect_timer(self) -> None:
         """Reset disconnect timer."""
@@ -527,13 +531,19 @@ class BaseDevice(ABC):
             self._client = None
             self._read_char = None
             self._write_char = None
+
+            # Clear any temporary listeners; they should not linger across sessions.
+            self._extra_notify_callbacks.clear()
+
             if client and client.is_connected:
                 if read_char:
+                    # On Windows/WinRT, stop_notify can raise KeyError if someone else
+                    # (e.g., a CLI probe) already removed the callback token. Be lenient.
                     try:
                         await client.stop_notify(read_char)
-                    except BleakError:
+                    except Exception:
                         self._logger.debug(
-                            "%s: Failed to stop notifications", self.name, exc_info=True
+                            "%s: stop_notify failed (already stopped?)", self.name, exc_info=True
                         )
                 await client.disconnect()
 
