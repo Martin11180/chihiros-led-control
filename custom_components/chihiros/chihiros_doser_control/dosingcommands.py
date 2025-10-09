@@ -1,7 +1,7 @@
 # custom_components/chihiros/chihiros_doser_control/dosingcommands.py
 from __future__ import annotations
 
-from datetime import time
+from datetime import time, datetime
 from typing import List, Tuple
 
 # Reuse checksum/ID logic from the LED package
@@ -20,6 +20,7 @@ __all__ = [
     "create_reset_auto_settings_command",
     "create_schedule_weekly_byte_amount",
     "create_schedule_weekly_hi_lo",
+    "create_set_time_command",                   # <-- ADDED
 ]
 
 # ────────────────────────────────────────────────────────────────
@@ -185,12 +186,28 @@ def create_order_confirmation(
     mode: int,
     command: int,
 ) -> bytearray:
-    """Generic “button/ack” wrapper."""
+    """Generic “button/ack” wrapper (e.g. 90/4 [1], 165/4 [4],[5])."""
     return _create_command_encoding_dosing_pump(command_id, mode, msg_id, [_clamp_byte(command)])
 
 def create_reset_auto_settings_command(msg_id: tuple[int, int]) -> bytearray:
     """Reset auto settings (semantics are firmware-dependent)."""
     return _create_command_encoding_dosing_pump(90, 5, msg_id, [5, 255, 255])
+
+def create_set_time_command(msg_id: tuple[int, int]) -> bytearray:
+    """
+    Set device time:
+      90/9 [YY, MM, idx, HH, MM, SS]
+      • YY = year - 2000
+      • idx = ISO weekday 1..7 (Mon=1 .. Sun=7)
+    """
+    now = datetime.now()
+    yy = (now.year - 2000) & 0xFF
+    mm = now.month & 0xFF
+    idx = now.isoweekday() & 0xFF
+    HH = now.hour & 0xFF
+    MM = now.minute & 0xFF
+    SS = now.second & 0xFF
+    return _create_command_encoding_dosing_pump(90, 9, msg_id, [yy, mm, idx, HH, MM, SS])
 
 # ────────────────────────────────────────────────────────────────
 # Dual schedule variants (support multiple firmware flavors)
