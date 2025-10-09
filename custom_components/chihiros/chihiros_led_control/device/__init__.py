@@ -1,3 +1,4 @@
+# custom_components/chihiros/chihiros_led_control/device/__init__.py
 """Module defining Chihiros devices."""
 from __future__ import annotations
 
@@ -30,10 +31,11 @@ from .z_light_tiny import ZLightTiny
 
 # Try to include the doser model; skip gracefully if unavailable
 try:
-    # sibling package under custom_components.chihiros
     from ...chihiros_doser_control.device.doser import Doser  # noqa: F401
-except Exception:
+    _HAS_DOSER = True
+except ImportError:
     Doser = None  # type: ignore[assignment]
+    _HAS_DOSER = False
 
 # Build a mapping of MODEL_CODE -> class by introspecting imported classes
 CODE2MODEL: dict[str, Type[BaseDevice]] = {}
@@ -86,7 +88,6 @@ __all__ = [
     "CII",
     "CIIRGB",
     "UniversalWRGB",
-    "Doser",
     "Fallback",
     "BaseDevice",
     "CODE2MODEL",
@@ -95,4 +96,5 @@ __all__ = [
     "GenericRGB",
     "GenericWhite",
     "GenericWRGB",
-]
+] + (["Doser"] if _HAS_DOSER else [])
+

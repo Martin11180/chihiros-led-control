@@ -1,10 +1,26 @@
-from __future__ import annotations 
+# custom_components/chihiros/chihiros_doser_control/dosingcommands.py
+from __future__ import annotations
 
 from datetime import time
 from typing import List, Tuple
 
+# Reuse checksum/ID logic from the LED package
 from ..chihiros_led_control import commands
-from .protocol import _split_ml_25_6  # use the same 25.6+0.1 encoder
+from .protocol import _split_ml_25_6  # same 25.6+0.1 encoder
+
+__all__ = [
+    "_create_command_encoding_dosing_pump",      # kept for back-compat
+    "create_command_encoding_dosing_pump",       # public alias
+    "create_add_dosing_pump_command_manuell_ml",
+    "create_add_dosing_pump_command_manuell_ml_amount",
+    "create_add_auto_setting_command_dosing_pump",
+    "create_auto_mode_dosing_pump_command_time",
+    "create_switch_to_auto_mode_dosing_pump_command",
+    "create_order_confirmation",
+    "create_reset_auto_settings_command",
+    "create_schedule_weekly_byte_amount",
+    "create_schedule_weekly_hi_lo",
+]
 
 # ────────────────────────────────────────────────────────────────
 # Byte helpers
@@ -70,6 +86,9 @@ def _create_command_encoding_dosing_pump(
     # last resort: return the last attempt
     return frame + bytes([checksum])
 
+# Public alias (no change in behavior, easier to import without underscore)
+create_command_encoding_dosing_pump = _create_command_encoding_dosing_pump
+
 # ────────────────────────────────────────────────────────────────
 # WRITE command creators
 # ────────────────────────────────────────────────────────────────
@@ -102,9 +121,7 @@ def create_add_dosing_pump_command_manuell_ml_amount(
     ch_id: int,
     ml: float | int | str,
 ) -> bytearray:
-    """
-    Convenience: pass ml directly (0.2..999.9), we split to (hi, lo) with 25.6+0.1.
-    """
+    """Convenience: pass ml directly (0.2..999.9), we split to (hi, lo) with 25.6+0.1."""
     hi, lo = _split_ml_25_6(ml)
     return create_add_dosing_pump_command_manuell_ml(msg_id, ch_id, hi, lo)
 
@@ -119,10 +136,6 @@ def create_add_auto_setting_command_dosing_pump(
     """
     Weekly schedule entry (confirmed layout):
       mode=0x1B (27), params = [channel, weekday_mask, enable(1/0), hour, minute, dose_x10]
-
-    Examples:
-      CH2, Monday 00:27 @ 7.5 mL → [1, 0x02, 1, 0, 27, 75]
-      CH1, Sat 01:00 @ 7.5 mL    → [0, 0x40, 1, 1,  0, 75]
     """
     _clamp_byte(ch_id)
     _clamp_byte(weekdays_mask & 0x7F)
@@ -179,10 +192,8 @@ def create_reset_auto_settings_command(msg_id: tuple[int, int]) -> bytearray:
     """Reset auto settings (semantics are firmware-dependent)."""
     return _create_command_encoding_dosing_pump(90, 5, msg_id, [5, 255, 255])
 
-
 # ────────────────────────────────────────────────────────────────
-# NEW: Dual schedule variants to support more firmware flavors
-#     (adds without replacing your existing API)
+# Dual schedule variants (support multiple firmware flavors)
 # ────────────────────────────────────────────────────────────────
 
 def create_schedule_weekly_byte_amount(
@@ -190,13 +201,12 @@ def create_schedule_weekly_byte_amount(
     msg_id: tuple[int, int],
     ch_id: int,
     weekdays_mask: int,
-    daily_ml_tenths: int,  # 0..255 (0.0..25.5 mL if strictly one byte)
+    daily_ml_tenths: int,  # 0..255
     enabled: bool = True,
 ) -> bytearray:
     """
     Variant A (single-byte dose×10 inside 0x1B):
       0x1B / 27 : [ch, weekday_mask, enable, HH, MM, dose_x10]
-    Keeps your existing “dose_x10” layout intact for firmwares that expect it.
     """
     _clamp_byte(ch_id)
     _clamp_byte(weekdays_mask & 0x7F)
@@ -223,8 +233,7 @@ def create_schedule_weekly_hi_lo(
     Variant B (time in 0x15, amount as hi/lo in 0x1B):
       0x15 / 21 : [ch, enable, HH, MM, 0, 0]
       0x1B / 27 : [ch, weekday_mask, enable, 0, ml_hi(25.6), ml_lo(0.1)]
-    Returns the two frames in order. Helpful for doses > 25.5 mL or firmwares
-    that expect the split-amount layout.
+    Returns the two frames in order.
     """
     _clamp_byte(ch_id)
     _clamp_byte(weekdays_mask & 0x7F)

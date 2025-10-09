@@ -1,3 +1,4 @@
+# custom_components/chihiros/chihiros_doser_control/__init__.py
 from __future__ import annotations
 
 # ────────────────────────────────────────────────────────────────

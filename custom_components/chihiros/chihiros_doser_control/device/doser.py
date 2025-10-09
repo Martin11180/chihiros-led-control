@@ -1,3 +1,4 @@
+# custom_components/chihiros/chihiros_doser_control/device/doser.py
 """Doser device model for discovery table."""
 
 from __future__ import annotations

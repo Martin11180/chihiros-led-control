@@ -1,3 +1,4 @@
+# custom_components/chihiros/chihiros_doser_control/protocol.py
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
@@ -5,6 +6,18 @@ from typing import List, Dict, Any, Tuple, Optional, Iterable, Union
 from decimal import Decimal, ROUND_HALF_UP, ROUND_FLOOR
 import json
 import re
+
+__all__ = [
+    "UART_SERVICE", "UART_RX", "UART_TX",
+    "CMD_MANUAL_DOSE", "MODE_MANUAL_DOSE", "CMD_LED_QUERY",
+    "_split_ml_25_6",
+    "dose_ml",
+    "build_totals_query_5b", "build_totals_query", "build_totals_probes",
+    "parse_totals_frame",
+    "decode_weekdays", "ml_from_25_6",
+    "parse_frame", "parse_log_blob", "decode_records",
+    "DeviceState", "ChannelState", "TimerState", "build_device_state", "to_ctl_lines",
+]
 
 # ────────────────────────────────────────────────────────────────
 # Nordic UART UUIDs (write to RX, notify on TX)
@@ -209,11 +222,19 @@ def ml_from_25_6(hi_buckets: int, tenths_remainder: int) -> float:
 # Frame decoders (tolerant)
 # ────────────────────────────────────────────────────────────────
 def _dose27_is_manual(params: List[int]) -> bool:
-    """Heuristic: manual dose is [ch,0,0,hi,lo] and hour/minute bytes make no sense."""
-    if len(params) != 6:
-        return False
-    ch, a, b, c, d, e = params
-    return (a == 0 and b == 0) and (c <= 10 and d <= 255 and e <= 255)
+    """
+    Heuristic: manual dose is either 5 or 6 bytes and ends with (hi, lo):
+      • [ch, 0, 0, hi, lo]
+      • [ch, 0, 0, x, hi, lo]  (some fw insert a filler byte)
+    """
+    n = len(params)
+    if n == 5:
+        ch, a, b, hi, lo = params
+        return a == 0 and b == 0 and 0 <= hi <= 10 and 0 <= lo <= 255
+    if n == 6:
+        ch, a, b, x, hi, lo = params
+        return a == 0 and b == 0 and 0 <= hi <= 10 and 0 <= lo <= 255
+    return False
 
 def _dose27_is_weekly(params: List[int]) -> bool:
     """Heuristic: weekly entry is [ch, mask, enable, HH, MM, dose_x10]."""
@@ -239,9 +260,12 @@ def decode_activate_165_32(params: List[int]) -> Dict[str, Any]:
     return {"type": "activate", "channel": ch, "enabled": bool(enable)}
 
 def decode_dose_165_27(params: List[int]) -> Dict[str, Any]:
-    # Two variants observed.
+    # Manual-dose variants first
     if _dose27_is_manual(params):
-        ch, _a, _b, hi, tenths, _maybe = params[0], params[1], params[2], params[3], params[4], params[5]
+        if len(params) == 5:
+            ch, _a, _b, hi, tenths = params
+        else:  # len == 6
+            ch, _a, _b, _x, hi, tenths = params
         ml = ml_from_25_6(hi, tenths)
         return {
             "type": "manual_dose",
@@ -250,6 +274,7 @@ def decode_dose_165_27(params: List[int]) -> Dict[str, Any]:
             "raw": params,
         }
 
+    # Weekly schedule (dose×10 byte)
     if _dose27_is_weekly(params):
         ch, mask, enable, HH, MM, dose10 = params
         return {
@@ -301,7 +326,7 @@ def parse_frame(cmd_id: int, mode: int, params: List[int]) -> Dict[str, Any]:
         return decode_time_90_9(params)
     if cmd_id == 165 and mode == 32 and len(params) == 3:
         return decode_activate_165_32(params)
-    if cmd_id == 165 and mode == 27 and len(params) == 6:
+    if cmd_id == 165 and mode == 27 and (len(params) in (5, 6)):
         return decode_dose_165_27(params)
     if cmd_id == 165 and mode == 21 and len(params) == 6:
         return decode_timer_165_21(params)
@@ -498,8 +523,9 @@ if __name__ == "__main__":
         (CMD_MANUAL_DOSE, 4,  [4]),
         (CMD_MANUAL_DOSE, 4,  [5]),
         (CMD_MANUAL_DOSE, 32, [2, 0, 1]),
-        (CMD_MANUAL_DOSE, 27, [2, 127, 1, 1, 1, 114]),  # 25.6*1 + 11.4 = 37.0 mL (legacy variant)
+        (CMD_MANUAL_DOSE, 27, [2, 127, 1, 1, 1, 114]),  # legacy weekly variant
         (CMD_MANUAL_DOSE, 21, [2, 1, 0, 42, 0, 0]),     # 24h start 00:42
+        (CMD_MANUAL_DOSE, 27, [1, 0, 0, 1, 140]),       # manual dose 25.6*1 + 14.0 = 39.6 mL (5-byte form)
     ]
     parsed = decode_records(example_frames)
     state = build_device_state(parsed)
