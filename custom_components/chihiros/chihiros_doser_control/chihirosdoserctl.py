@@ -37,7 +37,6 @@ from .protocol import (
     to_ctl_lines,
 )
 
-
 # ────────────────────────────────────────────────────────────────
 # Helpers
 # ────────────────────────────────────────────────────────────────
@@ -50,6 +49,19 @@ def _parse_hex_blob(blob: str) -> bytes:
         return bytes.fromhex(s)
     except ValueError as e:
         raise typer.BadParameter("Invalid hex characters in payload.") from e
+
+
+def _int0(val: str | int) -> int:
+    """
+    Parse int accepting 0x.. hex, 0.. octal, or decimal.
+    Works for Typer options passed as strings like '--mode-5b 0x22'.
+    """
+    if isinstance(val, int):
+        return val
+    try:
+        return int(str(val), 0)
+    except ValueError as e:
+        raise typer.BadParameter(f"Invalid integer/hex value: {val}") from e
 
 
 # ────────────────────────────────────────────────────────────────
@@ -302,22 +314,20 @@ def cli_add_setting_dosing_pump(
 @app.command("probe-totals")
 def cli_probe_totals(
     device_address: Annotated[str, typer.Argument(help="BLE MAC, e.g. AA:BB:CC:DD:EE:FF")],
-    timeout_s: Annotated[float, typer.Option(help="Listen timeout seconds", min=0.5)] = 8.0,
-    mode_5b: Annotated[int, typer.Option("--mode-5b", help="0x5B mode (e.g. 0x22 or 0x1E)")] = 0x22,
-    dump: Annotated[bool, typer.Option("--dump/--no-dump", help="Print every notification as hex")] = False,
+    timeout_s: Annotated[float, typer.Option(help="Listen timeout seconds", min=0.5)] = 6.0,
+    # Accept hex or decimal from the command line
+    mode_5b: Annotated[str, typer.Option(help="0x5B mode to use (e.g. 0x22 or 0x1E)")] = "0x22",
 ) -> None:
     """
     Send a LED-style (0x5B) totals request and print CH1..CH4 totals (mL) if received.
-    Tries multiple write styles (RX/TX, with/without response). Use --dump to see all frames.
+
+    NOTE: We use DoserDevice's notify helpers to avoid double start/stop issues on some backends.
     """
     async def run():
         dd: DoserDevice | None = None
-        loop = asyncio.get_running_loop()
-        got: asyncio.Future[bytes] = loop.create_future()
+        got: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
 
         def _on_notify(_char, payload: bytearray) -> None:
-            if dump:
-                typer.echo(f"notif: {payload.hex(' ').upper()}")
             vals = parse_totals_frame(payload)
             if vals and not got.done():
                 got.set_result(bytes(payload))
@@ -325,33 +335,19 @@ def cli_probe_totals(
         try:
             ble = await _resolve_ble_or_fail(device_address)
             dd = DoserDevice(ble)
-            client = await dd.connect()  # BaseDevice subscribes internally
+            client = await dd.connect()  # ensure connected
 
-            # attach temporary sniffer
-            dd.add_notify_callback(_on_notify)
+            # take control of TX notify using the device helper
+            await dd.ensure_notify(UART_TX, _on_notify)
 
-            frame = build_totals_query_5b(mode_5b)
+            frame = build_totals_query_5b(_int0(mode_5b))
 
-            async def _try_write(char, resp: bool) -> bool:
-                try:
-                    await client.write_gatt_char(char, frame, response=resp)
-                    return True
-                except Exception:
-                    return False
+            # Most firmwares take writes on RX, but some echo off TX; try RX first.
+            try:
+                await client.write_gatt_char(UART_RX, frame, response=True)
+            except Exception:
+                await client.write_gatt_char(UART_TX, frame, response=True)
 
-            # try a few write styles commonly accepted by firmwares
-            tried_any = False
-            for char in (UART_RX, UART_TX):
-                for resp in (False, True):
-                    ok = await _try_write(char, resp)
-                    tried_any = tried_any or ok
-                    if ok:
-                        # wait a short moment after a successful write to avoid spamming
-                        await asyncio.sleep(0.05)
-
-            if not tried_any:
-                typer.echo("Write attempts failed on both RX and TX; device may be busy.")
-                # still wait in case the device echoes something
             try:
                 payload = await asyncio.wait_for(got, timeout=timeout_s)
                 vals = parse_totals_frame(payload) or []
@@ -364,12 +360,13 @@ def cli_probe_totals(
                     typer.echo("Totals received but could not parse 4 channels.")
             except asyncio.TimeoutError:
                 typer.echo("No totals frame received within timeout.")
+        except (BleakDeviceNotFoundError, BleakError, OSError):
+            raise
         finally:
             if dd:
-                try:
-                    dd.remove_notify_callback(_on_notify)
-                finally:
-                    await dd.disconnect()
+                # Always stop notify and disconnect
+                await dd.stop_notify_safely(UART_TX)
+                await dd.disconnect()
 
     asyncio.run(run())
 
