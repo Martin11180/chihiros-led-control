@@ -17,6 +17,8 @@ __all__ = [
     "decode_weekdays", "ml_from_25_6",
     "parse_frame", "parse_log_blob", "decode_records",
     "DeviceState", "ChannelState", "TimerState", "build_device_state", "to_ctl_lines",
+    # optional helper (for nicer debug on params-only logs)
+    "interpret_param_burst",
 ]
 
 # ────────────────────────────────────────────────────────────────
@@ -182,19 +184,56 @@ def build_totals_probes() -> list[bytes]:
             uniq.append(f)
     return uniq
 
+# ────────────────────────────────────────────────────────────────
+# Robust totals parsing (0x5B)
+# ────────────────────────────────────────────────────────────────
+def _looks_like_totals_pairs(p: List[int]) -> bool:
+    """
+    Heuristic: p must be length 8 and represent four (hi, lo) pairs where
+    hi is small (0..10 is plenty for most realistic daily totals with 25.6 mL buckets)
+    and lo fits in a byte (0..255).
+    """
+    if len(p) != 8:
+        return False
+    for i in range(0, 8, 2):
+        hi = p[i]
+        lo = p[i + 1]
+        if not (0 <= hi <= 10 and 0 <= lo <= 255):
+            return False
+    return True
+
+def _decode_totals_pairs(pairs8: List[int]) -> List[float]:
+    # hi*25.6 + lo*0.1 for 4 channels
+    return [round(pairs8[i] * 25.6 + pairs8[i + 1] / 10.0, 1) for i in range(0, 8, 2)]
+
 def parse_totals_frame(payload: bytes | bytearray) -> Optional[List[float]]:
     """
-    If 'payload' is 0x5B-style with exactly 8 params, decode 4 channel totals:
+    If 'payload' is 0x5B-style, decode 4 channel totals:
       [ch1_hi, ch1_lo, ch2_hi, ch2_lo, ch3_hi, ch3_lo, ch4_hi, ch4_lo]
       ml = hi*25.6 + lo*0.1
+
+    Supports both the strict 8-param form and longer packets that embed the 8
+    bytes somewhere in the params (common on some firmwares).
     """
     if not isinstance(payload, (bytes, bytearray)) or len(payload) < 15:
         return None
-    cmd = payload[0]
-    params = list(payload[6:-1])  # after 'mode' up to checksum
-    if cmd == CMD_LED_QUERY and len(params) == 8:
-        pairs = list(zip(params[0::2], params[1::2]))
-        return [round(h * 25.6 + l / 10.0, 1) for h, l in pairs]
+    if payload[0] != CMD_LED_QUERY:
+        return None
+
+    # params live after 'mode' byte up to (but excluding) checksum
+    params = list(payload[6:-1])
+
+    # Fast path: exactly 8 → decode directly
+    if len(params) == 8 and _looks_like_totals_pairs(params):
+        return _decode_totals_pairs(params)
+
+    # Robust path: scan any contiguous window of length 8 that looks like totals
+    if len(params) >= 8:
+        for i in range(0, len(params) - 8 + 1):
+            win = params[i:i + 8]
+            if _looks_like_totals_pairs(win):
+                return _decode_totals_pairs(win)
+
     return None
 
 # ────────────────────────────────────────────────────────────────
@@ -481,7 +520,8 @@ def _weekday_str(mask: Optional[int]) -> str:
     # preserve Mon..Sun ordering for readability
     order = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]
     names_sorted = [n for n in order if n in names]
-    short = {"monday":"Mon","tuesday":"Tue","wednesday":"Wed","thursday":"Thu","friday":"Fri","saturday":"Sat","sunday":"Sun"}
+    short = {"monday":"Mon","tuesday":"Tue","wednesday":"Wed","thursday":"Thu",
+             "friday":"Fri","saturday":"Sat","sunday":"Sun"}
     return ",".join(short[n] for n in names_sorted) if names_sorted else "None"
 
 def to_ctl_lines(state: DeviceState) -> List[str]:
@@ -510,6 +550,52 @@ def to_ctl_lines(state: DeviceState) -> List[str]:
         if st.timer.timer_type is not None:
             lines.append(f"ch{chn}.timer_type={int(st.timer.timer_type)}")
     return lines
+
+# ────────────────────────────────────────────────────────────────
+# Optional: interpret bare params bursts from notify logs
+# ────────────────────────────────────────────────────────────────
+def interpret_param_burst(params: List[int]) -> Dict[str, Any]:
+    """
+    Best-effort interpretation of a bare params array captured from notify logs
+    when the logger only prints the params (no cmd/mode header). This is only
+    for diagnostics; it cannot be definitive.
+    """
+    n = len(params)
+    out: Dict[str, Any] = {"guess": "unknown", "details": {"len": n, "params": params}}
+
+    # Obvious 6-field timer shape: [ch, type/en, HH, MM, r1, r2]
+    if n == 6 and 0 <= params[2] <= 23 and 0 <= params[3] <= 59:
+        out["guess"] = "maybe_timer_165_21"
+        out["details"].update({"channel": params[0], "hour": params[2], "minute": params[3]})
+        return out
+
+    # 6-field weekly schedule [ch, mask, enable, HH, MM, dose×10]
+    if n == 6 and 0 <= params[1] <= 127 and params[2] in (0, 1) and 0 <= params[3] <= 23 and 0 <= params[4] <= 59:
+        out["guess"] = "maybe_weekly_165_27"
+        out["details"].update({
+            "channel": params[0], "weekdays_mask": params[1], "enabled": bool(params[2]),
+            "hour": params[3], "minute": params[4], "dose_tenths": params[5],
+        })
+        return out
+
+    # 5/6-byte manual dose ending in (hi, lo)
+    if (n == 5 and params[1] == 0 and params[2] == 0) or (n == 6 and params[1] == 0 and params[2] == 0):
+        hi, lo = (params[-2], params[-1])
+        if 0 <= hi <= 10 and 0 <= lo <= 255:
+            out["guess"] = "maybe_manual_dose_165_27"
+            out["details"].update({"channel": params[0], "amount_ml": ml_from_25_6(hi, lo)})
+            return out
+
+    # Try totals window if someone logged only the params section of a 0x5B frame
+    if n >= 8:
+        for i in range(0, n - 8 + 1):
+            win = params[i:i + 8]
+            if _looks_like_totals_pairs(win):
+                out["guess"] = "maybe_led_totals_0x5B"
+                out["details"]["totals_ml"] = _decode_totals_pairs(win)
+                return out
+
+    return out
 
 # ────────────────────────────────────────────────────────────────
 # Quick self-test / example
