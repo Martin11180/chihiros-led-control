@@ -1,4 +1,3 @@
-# custom_components/chihiros/chihiros_led_control/chihirosctl.py
 """Chihiros led control CLI entrypoint."""
 
 from __future__ import annotations
@@ -7,16 +6,14 @@ import asyncio
 import inspect
 from pathlib import Path
 from datetime import datetime
-from typing import Any
+from typing import Any, List
 
 import typer
 from typing_extensions import Annotated
 
-from typing import Optional
 from bleak import BleakScanner
 from rich import print
 from rich.table import Table
-from typing_extensions import Annotated
 
 from . import commands
 from .device import get_device_from_address, get_model_class_from_name
@@ -30,6 +27,7 @@ try:
 except Exception as _e:
     # Provide a small stub so `chihirosctl doser --help` is informative, not a crash.
     doser_app = typer.Typer(help="Doser commands unavailable")
+
     @doser_app.callback()
     def _doser_unavailable():
         typer.secho(
@@ -56,9 +54,11 @@ except Exception as _e:
     parse_wireshark_stream = None  # type: ignore
     write_jsonl = None  # type: ignore
 
+
 def _require_ws():
     if parse_wireshark_stream is None or write_jsonl is None:
         raise typer.Exit(code=2)
+
 
 msg_id = commands.next_message_id()
 
@@ -75,6 +75,7 @@ def _run_device_func(device_address: str, **kwargs: Any) -> None:
             raise typer.Abort()
 
     asyncio.run(_async_func())
+
 
 @wireshark_app.command("parse")
 def wireshark_parse(
@@ -102,11 +103,12 @@ def wireshark_parse(
     except Exception as e:
         raise typer.BadParameter(f"Parse failed: {e}") from e
 
+
 @wireshark_app.command("peek")
 def wireshark_peek(
     infile: Annotated[Path, typer.Argument(exists=True, readable=True, help="Wireshark export (JSON array or NDJSON)")],
     limit: Annotated[int, typer.Option("--limit", "-n", help="Number of frames to show", min=1)] = 12,
-    handle: Annotated[str, typer.Option(help="ATT handle match (default 0x0010)")]= "0x0010",
+    handle: Annotated[str, typer.Option(help="ATT handle match (default 0x0010)")] = "0x0010",
     op: Annotated[str, typer.Option(help="ATT op filter: write|notify|any")] = "any",
     rx: Annotated[str, typer.Option(help="Include notifications: no|also|only")] = "also",
 ) -> None:
@@ -145,11 +147,11 @@ def wireshark_peek(
                     shown += 1
                     if shown > limit:
                         break
-                    ts = str(rec.get("ts",""))
-                    op = rec.get("att_op","")
-                    h  = rec.get("att_handle","")
-                    ln = rec.get("len","")
-                    hx = rec.get("bytes_hex","")
+                    ts = str(rec.get("ts", ""))
+                    op = rec.get("att_op", "")
+                    h = rec.get("att_handle", "")
+                    ln = rec.get("len", "")
+                    hx = rec.get("bytes_hex", "")
                     print(f"[{shown:02d}] {ts}  {op}  handle={h}  len={ln}  hex={hx[:64]}{'…' if ln and ln>32 else ''}")
             if shown == 0:
                 typer.secho("No matching frames.", fg=typer.colors.YELLOW)
@@ -193,7 +195,7 @@ def turn_off(device_address: str) -> None:
 def set_color_brightness(
     device_address: str,
     color: int,
-    brightness: Annotated[int, typer.Argument(min=0, max=100)],
+    brightness: Annotated[int, typer.Argument(min=0, max=140)],
 ) -> None:
     """Set color brightness of a light."""
     _run_device_func(device_address, color=color, brightness=brightness)
@@ -201,17 +203,23 @@ def set_color_brightness(
 
 @app.command()
 def set_brightness(
-    device_address: str, brightness: Annotated[int, typer.Argument(min=0, max=100)]
+    device_address: str, brightness: Annotated[int, typer.Argument(min=0, max=140)]
 ) -> None:
-    """Set brightness of a light."""
+    """Set overall brightness of a light."""
     set_color_brightness(device_address, color=0, brightness=brightness)
 
 
-@app.command()
+# NEW: accepts 1, 3, or 4 integers (0..140) and enforces safe totals in BaseDevice.
+@app.command(name="set-rgb-brightness")
 def set_rgb_brightness(
-    device_address: str, brightness: Annotated[tuple[int, int, int], typer.Argument()]
+    device_address: str,
+    brightness: Annotated[
+        List[int],
+        typer.Argument(min=0, max=140, help="One value or 3/4 values: R G B [W], each 0..140"),
+    ],
 ) -> None:
-    """Set brightness of a RGB light."""
+    """Set per-channel RGB/RGBW brightness."""
+    print(f"Connect to device {device_address} and set RGB{'W' if len(brightness)==4 else ''} to {brightness} %")
     _run_device_func(device_address, brightness=brightness)
 
 

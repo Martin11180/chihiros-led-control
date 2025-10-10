@@ -6,7 +6,7 @@ import asyncio
 import logging
 from abc import ABC, ABCMeta
 from datetime import datetime
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Union, Sequence
 
 import typer
 from bleak.backends.device import BLEDevice
@@ -71,6 +71,20 @@ def _mk_ble_device(addr_or_ble: Union[BLEDevice, str]) -> BLEDevice:
     # Bleak 1.x ctor signature on all backends we support: BLEDevice(address, name, details)
     # Keep 'name=None' so Bleak doesn't think we have an advertised name.
     return BLEDevice(mac, None, 0)  # or BLEDevice(mac, None, None)
+
+
+# ────────────────────────────────────────────────────────────────
+# Brightness helpers
+# ────────────────────────────────────────────────────────────────
+
+def _check_rgb_totals(vals: Sequence[int]) -> None:
+    """Enforce total-power safety: RGB ≤ 300, RGBW ≤ 400."""
+    n = len(vals)
+    total = sum(int(v) for v in vals)
+    if n == 3 and total > 300:
+        raise ValueError("The values of RGB (R+G+B) must not exceed 300%.")
+    if n == 4 and total > 400:
+        raise ValueError("The values of RGBW (R+G+B+W) must not exceed 400%.")
 
 
 class BaseDevice(ABC):
@@ -169,7 +183,7 @@ class BaseDevice(ABC):
 
     async def set_color_brightness(
         self,
-        brightness: Annotated[int, typer.Argument(min=0, max=100)],
+        brightness: Annotated[int, typer.Argument(min=0, max=140)],
         color: str | int = 0,
     ) -> None:
         """Set brightness of a color."""
@@ -182,22 +196,47 @@ class BaseDevice(ABC):
             self._logger.warning("Color not supported: `%s`", color)
             return
         cmd = commands.create_manual_setting_command(
-            self.get_next_msg_id(), color_id, brightness
+            self.get_next_msg_id(), color_id, int(brightness)
         )
         await self._send_command(cmd, 3)
 
     async def set_brightness(
-        self, brightness: Annotated[int, typer.Argument(min=0, max=100)]
+        self, brightness: Annotated[int, typer.Argument(min=0, max=140)]
     ) -> None:
-        """Set light brightness."""
-        await self.set_color_brightness(brightness)
+        """Set overall brightness (maps to the default color channel)."""
+        await self.set_color_brightness(brightness=brightness, color=0)
 
     async def set_rgb_brightness(
-        self, brightness: Annotated[tuple[int, int, int], typer.Argument()]
+        self, brightness: Annotated[Sequence[int], typer.Argument()]
     ) -> None:
-        """Set RGB brightness."""
-        for c, b in enumerate(brightness):
-            await self.set_color_brightness(c, b)
+        """
+        Set per-channel brightness. Accepts 1, 3, or 4 values:
+          • 1 → broadcast to R,G,B
+          • 3 → R, G, B
+          • 4 → R, G, B, W
+        Enforces per-channel range (0..140) and total caps (RGB≤300, RGBW≤400).
+        """
+        vals = [int(v) for v in brightness]
+
+        if len(vals) == 1:
+            # replicate across RGB; to include W on RGBW models, change to: [v,v,v,v]
+            vals = [vals[0], vals[0], vals[0]]
+        elif len(vals) in (3, 4):
+            pass
+        else:
+            raise ValueError("Provide either 1 value, or 3 (R G B), or 4 (R G B W).")
+
+        # per-channel bounds
+        for v in vals:
+            if not (0 <= v <= 140):
+                raise ValueError("Each channel must be between 0 and 140.")
+
+        # total-power safety
+        _check_rgb_totals(vals)
+
+        # send values to channels in order (0=R,1=G,2=B,3=W)
+        for chan_index, chan_value in enumerate(vals):
+            await self.set_color_brightness(brightness=chan_value, color=chan_index)
 
     async def turn_on(self) -> None:
         """Turn on light."""
