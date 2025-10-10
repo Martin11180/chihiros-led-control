@@ -20,7 +20,23 @@ from .weekday_encoding import WeekdaySelect
 
 # Mount the doser Typer app under "doser"
 # (use the thin shim so the import path stays stable)
-from ..chihiros_doser_control.chihirosdoserctl import app as doser_app
+# Mount the doser Typer app under "doser"
+# (use the thin shim so the import path stays stable)
+# Make this import **robust** so LED CLI still works when doser deps/HA are missing.
+try:
+    from ..chihiros_doser_control.chihirosdoserctl import app as doser_app  # type: ignore
+except Exception as _e:
+    # Provide a small stub so `chihirosctl doser --help` is informative, not a crash.
+    doser_app = typer.Typer(help="Doser commands unavailable")
+    @doser_app.callback()
+    def _doser_unavailable():
+        typer.secho(
+            "Doser CLI is unavailable in this environment.\n"
+            "• If you only need Wireshark conversion, use: wireshark-ble-to-jsonl ...\n"
+            "• To use doser commands without Home Assistant, ensure optional deps (e.g. bleak) are installed\n"
+            "  or use the dedicated entry point: chihirosctl-lite (if configured in pyproject.toml).",
+            fg=typer.colors.YELLOW,
+        )
 
 app = typer.Typer()
 app.add_typer(doser_app, name="doser", help="Chihiros doser control")

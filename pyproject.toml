@@ -44,3 +44,4 @@ include = [
 [project.scripts]
 chihirosctl = "custom_components.chihiros.chihiros_led_control.chihirosctl:app"
 wireshark-ble-to-jsonl = "tools.wireshark_ble_to_jsonl:main"
+chihirosctl-lite = "custom_components.chihiros.chihiros_doser_control.chihirosdoserctl:app"

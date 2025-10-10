@@ -1,3 +1,4 @@
+# custom_components/chihiros/__init__.py
 """Chihiros HA integration root module."""
 from __future__ import annotations
 
