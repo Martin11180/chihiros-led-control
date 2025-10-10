@@ -18,17 +18,16 @@ from typer import Context
 from typing_extensions import Annotated
 from bleak.exc import BleakDeviceNotFoundError, BleakError
 
-# Weekday helpers (shared with LED package)
-from ..chihiros_led_control.weekday_encoding import (
-    WeekdaySelect,
-    encode_selected_weekdays,
+# Import the existing doser CLI app, the device class, and local weekday helpers
+from .device.doser_device import app as app
+from .device.doser_device import (
+    DoserDevice,
+    _resolve_ble_or_fail,     # used by helpers
+    WeekdaySelect,            # local (no LED pkg dep)
+    encode_selected_weekdays, # local (no LED pkg dep)
 )
 
-# Import the existing doser CLI app and the device class
-from .device.doser_device import app as app
-from .device.doser_device import DoserDevice, _resolve_ble_or_fail  # used by helpers
-
-# Protocol bits for utilities / probes / decode→state→ctl
+# Protocol bits for utilities / probes / decode→state→ctl (all local)
 from .protocol import (
     UART_TX,
     UART_RX,

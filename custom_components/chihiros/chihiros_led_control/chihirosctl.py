@@ -1,3 +1,4 @@
+# custom_components/chihiros/chihiros_led_control/chihirosctl.py
 """Chihiros led control CLI entrypoint."""
 
 from __future__ import annotations
