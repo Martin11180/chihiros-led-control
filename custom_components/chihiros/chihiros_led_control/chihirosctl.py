@@ -18,6 +18,8 @@ from rich.table import Table
 from . import commands
 from .device import get_device_from_address, get_model_class_from_name
 from .weekday_encoding import WeekdaySelect
+from ..chihiros_template_control import storage_containers as sc
+from ..chihiros_template_control.chihirostemplatectl import app as template_app
 
 # Mount the doser Typer app under "doser"
 # (use the thin shim so the import path stays stable)
@@ -40,7 +42,7 @@ except Exception as _e:
 
 app = typer.Typer()
 app.add_typer(doser_app, name="doser", help="Chihiros doser control")
-
+app.add_typer(template_app, name="template", help="Chihiros template control")
 # ────────────────────────────────────────────────────────────────
 # Wireshark helpers (shared; no HA dependency)
 # ────────────────────────────────────────────────────────────────
@@ -162,22 +164,26 @@ def wireshark_peek(
 @app.command()
 def list_devices(timeout: Annotated[int, typer.Option()] = 5) -> None:
     """List all bluetooth devices.
-
+    
     TODO: add an option to show only Chihiros devices
     """
     table = Table("Name", "Address", "Model")
     discovered_devices = asyncio.run(BleakScanner.discover(timeout=timeout))
-    for device in discovered_devices:
+    chd = []
+    for idx, device in enumerate(discovered_devices):
         name = device.name or ""
         model_name = "???"
         if name:
             model_class = get_model_class_from_name(name)
             # Use safe getattr so we don't assume any class attributes exist
             model_name = getattr(model_class, "model_name", "???") or "???"
+            if not model_name == "???" and not model_name == "fallback":
+               name_chd = [device.address, str(model_name), str(name)]
+               chd.insert(idx, name_chd)
         table.add_row(name or "(unknown)", device.address, model_name)
     print("Discovered the following devices:")
     print(table)
-
+    sc.set_template_device_trusted(chd)
 
 @app.command()
 def turn_on(device_address: str) -> None:
