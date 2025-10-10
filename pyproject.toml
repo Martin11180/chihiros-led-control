@@ -35,6 +35,7 @@ include-package-data = true
 [tool.setuptools.packages.find]
 include = [
   "custom_components*",
+  "tools*",
 ]
 
 [tool.setuptools_scm]
@@ -42,3 +43,4 @@ include = [
 
 [project.scripts]
 chihirosctl = "custom_components.chihiros.chihiros_led_control.chihirosctl:app"
+wireshark-ble-to-jsonl = "tools.wireshark_ble_to_jsonl:main"

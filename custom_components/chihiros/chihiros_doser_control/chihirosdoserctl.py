@@ -39,6 +39,10 @@ from .protocol import (
     to_ctl_lines,
 )
 
+# ── Wireshark BLE to JSONL Parser ─────────────────────────────────────────
+import json, base64
+from pathlib import Path
+
 # ────────────────────────────────────────────────────────────────
 # Global options (e.g., --debug) applied to the shared app
 # ────────────────────────────────────────────────────────────────
@@ -495,3 +499,113 @@ def cli_raw_dosing_pump(
             if dd:
                 await dd.disconnect()
     asyncio.run(run())
+
+
+# ────────────────────────────────────────────────────────────────
+# Wireshark BLE to JSONL Parser
+# ────────────────────────────────────────────────────────────────
+@app.command("wireshark-parse")
+def wireshark_parse(
+    input_path: Annotated[Path, typer.Argument(help="Wireshark JSON export (array or NDJSON)")],
+    handle: Annotated[str, typer.Option("--handle", help="ATT handle to match (default 0x0010 for Nordic UART TX)")] = "0x0010",
+    op: Annotated[str, typer.Option("--op", help="ATT op to extract: write|notify|any")] = "write",
+    rx: Annotated[str, typer.Option("--rx", help="Include notifications (RX): no|also|only")] = "no",
+):
+    """
+    Convert a Wireshark JSON export into JSON Lines with ATT payloads.
+
+    Examples:
+      chihirosdoserctl wireshark-parse export.json > out.jsonl
+      chihirosdoserctl wireshark-parse export.json --rx also > out.jsonl
+      chihirosdoserctl wireshark-parse export.json --op notify --rx only > out.jsonl
+    """
+    def iter_records(stream):
+        first = stream.read(1)
+        if not first:
+            return
+        if first == "[":
+            buf = "[" + stream.read()
+            for x in json.loads(buf):
+                yield x
+        else:
+            line = first + stream.readline()
+            if line.strip():
+                yield json.loads(line)
+            for line in stream:
+                if line.strip():
+                    yield json.loads(line)
+
+    def layers_of(rec):
+        src = rec.get("_source", rec)
+        layers = src.get("layers", src.get("_source.layers")) or {}
+        if not isinstance(layers, dict):
+            return {}
+        out = {}
+        for k, v in layers.items():
+            out[k] = v[0] if isinstance(v, list) and len(v) == 1 else v
+        return out
+
+    def get(d, *path, default=None):
+        cur = d
+        for p in path:
+            if not isinstance(cur, dict) or p not in cur:
+                return default
+            cur = cur[p]
+        return cur
+
+    def btatt_value_to_bytes(v: str) -> bytes:
+        hexstr = v.replace(":", "").replace(" ", "").strip()
+        return bytes.fromhex(hexstr)
+
+    with input_path.open("r", encoding="utf-8") as f:
+        for rec in iter_records(f):
+            layers = layers_of(rec)
+            frame = layers.get("frame", {})
+            btatt = layers.get("btatt", {})
+            if not isinstance(btatt, dict):
+                continue
+
+            method = get(btatt, "btatt.opcode.method") or get(btatt, "btatt.opcode")
+            handle_val = get(btatt, "btatt.handle")
+            # value may live either at btatt.value or inside a value_tree
+            value = btatt.get("btatt.value")
+            if not value and isinstance(btatt.get("btatt.value_tree"), dict):
+                value = btatt["btatt.value_tree"].get("btatt.value")
+
+            if isinstance(method, list): method = method[0]
+            if isinstance(handle_val, list): handle_val = handle_val[0]
+            if isinstance(value, list): value = value[0]
+
+            is_write = (method == "0x12")
+            is_notify = (method == "0x1b")
+
+            if op == "write" and not is_write:
+                continue
+            if op == "notify" and not is_notify:
+                continue
+            if op == "any" and not (is_write or is_notify):
+                continue
+
+            # normalize handles like 0x0010 vs 0x10
+            def _norm_handle(h: str) -> str:
+                try:
+                    return f"0x{int(h, 16):x}"
+                except Exception:
+                    return (h or "").lower()
+            if handle_val and _norm_handle(handle_val) != _norm_handle(handle):
+                if not (rx in ("only","also") and is_notify):
+                    continue
+
+            if not value:
+                continue
+
+            data = btatt_value_to_bytes(value)
+            out = {
+                "ts": get(frame, "frame.time") or get(frame, "frame.time_epoch"),
+                "att_op": "Write Request" if is_write else ("Handle Value Notification" if is_notify else method),
+                "att_handle": handle_val,
+                "bytes_hex": data.hex(),
+                "bytes_b64": base64.b64encode(data).decode("ascii"),
+                "len": len(data),
+            }
+            typer.echo(json.dumps(out, separators=(",",":")))

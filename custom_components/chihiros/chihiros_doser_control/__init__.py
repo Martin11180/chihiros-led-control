@@ -1,6 +1,10 @@
 # custom_components/chihiros/chihiros_doser_control/__init__.py
 from __future__ import annotations
 
+# Explicit public API so this module is import-safe for CLI/tests regardless of HA.
+# (The name is defined in both branches below.)
+__all__ = ["register_services"]
+
 # ────────────────────────────────────────────────────────────────
 # Import guard so this module can be imported without Home Assistant
 # (e.g. when running the CLI). We only define the real implementation
@@ -38,7 +42,6 @@ try:
 except ModuleNotFoundError:
     HA_AVAILABLE = False
 
-
 # ────────────────────────────────────────────────────────────────
 # Public API when HA is *not* installed (CLI import-safe)
 # ────────────────────────────────────────────────────────────────
@@ -49,7 +52,7 @@ if not HA_AVAILABLE:
 
     async def register_services(*_args, **_kwargs) -> None:
         raise RuntimeError(
-            "Chihiros doser services require Home Assistant. "
+            "Chihiros_doser_control: services require Home Assistant runtime. "
             "This module can be imported safely by the CLI, "
             "but service registration only works inside Home Assistant."
         )
@@ -520,7 +523,13 @@ else:
 
             # Then the actual 24h configuration
             for frame in (f_schedule, f_daily_ml, f_catchup):
-                await client.write_gatt_char(dp.UART_RX, frame, response=True)
+                try:
+                    await client.write_gatt_char(dp.UART_RX, frame, response=True)
+                except Exception:
+                    try:
+                        await client.write_gatt_char(dp.UART_TX, frame, response=True)
+                    except Exception:
+                        pass
                 await asyncio.sleep(0.10)
 
             # Notify user via persistent_notification (now shows time and English days)
