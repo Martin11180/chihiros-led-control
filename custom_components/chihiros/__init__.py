@@ -2,8 +2,9 @@
 """Chihiros HA integration root module."""
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
+import logging
+
 
 # Keep this import minimal; if your const.py is simple, it’s fine to do at top level.
 from .const import DOMAIN
@@ -122,6 +123,10 @@ async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool
         [Platform.BUTTON, Platform.NUMBER] if is_doser else [Platform.LIGHT, Platform.SWITCH]
     )
 
+    _LOGGER.debug(
+        "Loading platforms for %s (%s): %s", entry.title, coordinator.device_type, platforms_to_load
+    )
+
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = ChihirosData(entry.title, chihiros_device, coordinator)
 
@@ -164,3 +169,9 @@ async def async_get_options_flow(config_entry: "ConfigEntry"):
     # Lazy import avoids circular/import-order issues
     from .config_flow import ChihirosOptionsFlow
     return ChihirosOptionsFlow(config_entry)
+
+# ────────────────────────────────────────────────────────────────
+# Optional: re-export the wireshark subpackage for nicer imports:
+#   from custom_components.chihiros import wireshark
+# ────────────────────────────────────────────────────────────────
+from . import wireshark as wireshark  # noqa: F401

@@ -5,7 +5,7 @@ Convert a Wireshark JSON export (array or NDJSON/"-T ek") into JSON Lines (one J
 
 import argparse, sys
 from pathlib import Path
-from custom_components.chihiros.chihiros_doser_control.wireshark_core import (
+from custom_components.chihiros.wireshark.wireshark_core import (
     parse_wireshark_stream, write_jsonl
 )
 

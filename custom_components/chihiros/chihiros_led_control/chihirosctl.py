@@ -5,10 +5,14 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from pathlib import Path
 from datetime import datetime
 from typing import Any
 
 import typer
+from typing_extensions import Annotated
+
+from typing import Optional
 from bleak import BleakScanner
 from rich import print
 from rich.table import Table
@@ -18,8 +22,6 @@ from . import commands
 from .device import get_device_from_address, get_model_class_from_name
 from .weekday_encoding import WeekdaySelect
 
-# Mount the doser Typer app under "doser"
-# (use the thin shim so the import path stays stable)
 # Mount the doser Typer app under "doser"
 # (use the thin shim so the import path stays stable)
 # Make this import **robust** so LED CLI still works when doser deps/HA are missing.
@@ -32,7 +34,7 @@ except Exception as _e:
     def _doser_unavailable():
         typer.secho(
             "Doser CLI is unavailable in this environment.\n"
-            "• If you only need Wireshark conversion, use: wireshark-ble-to-jsonl ...\n"
+            "• Wireshark helpers are still available under: chihirosctl wireshark ...\n"
             "• To use doser commands without Home Assistant, ensure optional deps (e.g. bleak) are installed\n"
             "  or use the dedicated entry point: chihirosctl-lite (if configured in pyproject.toml).",
             fg=typer.colors.YELLOW,
@@ -40,6 +42,23 @@ except Exception as _e:
 
 app = typer.Typer()
 app.add_typer(doser_app, name="doser", help="Chihiros doser control")
+
+# ────────────────────────────────────────────────────────────────
+# Wireshark helpers (shared; no HA dependency)
+# ────────────────────────────────────────────────────────────────
+wireshark_app = typer.Typer(help="Wireshark helpers (parse/peek BLE ATT payloads)")
+app.add_typer(wireshark_app, name="wireshark")
+
+# Import the new shared helpers
+try:
+    from ..wireshark.wireshark_core import parse_wireshark_stream, write_jsonl  # type: ignore
+except Exception as _e:
+    parse_wireshark_stream = None  # type: ignore
+    write_jsonl = None  # type: ignore
+
+def _require_ws():
+    if parse_wireshark_stream is None or write_jsonl is None:
+        raise typer.Exit(code=2)
 
 msg_id = commands.next_message_id()
 
@@ -56,6 +75,86 @@ def _run_device_func(device_address: str, **kwargs: Any) -> None:
             raise typer.Abort()
 
     asyncio.run(_async_func())
+
+@wireshark_app.command("parse")
+def wireshark_parse(
+    infile: Annotated[Path, typer.Argument(exists=True, readable=True, help="Wireshark export (JSON array or NDJSON)")],
+    outfile: Annotated[Path, typer.Option("--out", "-o", help="Output JSONL path (use '-' for stdout)")] = Path("-"),
+    handle: Annotated[str, typer.Option(help="ATT handle to match (default Nordic UART TX 0x0010)")] = "0x0010",
+    op: Annotated[str, typer.Option(help="ATT op filter: write|notify|any")] = "write",
+    rx: Annotated[str, typer.Option(help="Include notifications: no|also|only")] = "no",
+    pretty: Annotated[bool, typer.Option("--pretty/--no-pretty", help="Pretty JSONL (indented)")] = False,
+) -> None:
+    """
+    Convert a Wireshark JSON export into JSON Lines of BLE ATT payloads.
+    """
+    _require_ws()
+    try:
+        with infile.open("r", encoding="utf-8") as f:
+            rows = parse_wireshark_stream(f, handle=handle, op=op, rx=rx)  # type: ignore
+            if str(outfile) == "-":
+                import sys
+                write_jsonl(rows, sys.stdout, pretty=pretty)  # type: ignore
+            else:
+                outfile.parent.mkdir(parents=True, exist_ok=True)
+                with outfile.open("w", encoding="utf-8") as out:
+                    write_jsonl(rows, out, pretty=pretty)  # type: ignore
+    except Exception as e:
+        raise typer.BadParameter(f"Parse failed: {e}") from e
+
+@wireshark_app.command("peek")
+def wireshark_peek(
+    infile: Annotated[Path, typer.Argument(exists=True, readable=True, help="Wireshark export (JSON array or NDJSON)")],
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Number of frames to show", min=1)] = 12,
+    handle: Annotated[str, typer.Option(help="ATT handle match (default 0x0010)")]= "0x0010",
+    op: Annotated[str, typer.Option(help="ATT op filter: write|notify|any")] = "any",
+    rx: Annotated[str, typer.Option(help="Include notifications: no|also|only")] = "also",
+) -> None:
+    """
+    Show the first few normalized frames (ts, op, handle, len, hex…).
+    """
+    _require_ws()
+    try:
+        from rich.table import Table  # pretty if available
+        from rich.console import Console
+        has_rich = True
+    except Exception:
+        has_rich = False
+
+    try:
+        with infile.open("r", encoding="utf-8") as f:
+            rows = parse_wireshark_stream(f, handle=handle, op=op, rx=rx)  # type: ignore
+            shown = 0
+            if has_rich:
+                table = Table("idx", "time", "op", "handle", "len", "hex")
+                for rec in rows:
+                    shown += 1
+                    if shown > limit:
+                        break
+                    table.add_row(
+                        str(shown),
+                        str(rec.get("ts", ""))[:23],
+                        str(rec.get("att_op", "")),
+                        str(rec.get("att_handle", "")),
+                        str(rec.get("len", "")),
+                        (rec.get("bytes_hex", "")[:64] + ("…" if rec.get("len", 0) > 32 else "")),
+                    )
+                Console().print(table)
+            else:
+                for rec in rows:
+                    shown += 1
+                    if shown > limit:
+                        break
+                    ts = str(rec.get("ts",""))
+                    op = rec.get("att_op","")
+                    h  = rec.get("att_handle","")
+                    ln = rec.get("len","")
+                    hx = rec.get("bytes_hex","")
+                    print(f"[{shown:02d}] {ts}  {op}  handle={h}  len={ln}  hex={hx[:64]}{'…' if ln and ln>32 else ''}")
+            if shown == 0:
+                typer.secho("No matching frames.", fg=typer.colors.YELLOW)
+    except Exception as e:
+        raise typer.BadParameter(f"Peek failed: {e}") from e
 
 
 @app.command()

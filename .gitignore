@@ -159,8 +159,11 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-# Wireshark & derived artifacts
-*.pcap *.pcapng
-wireshark_*.json
-*.jsonl
-captures/
+# ── Wireshark & derived artifacts ───────────────────────────────
+# binary captures anywhere
+*.pcap
+*.pcapng
+
+# Only ignore exported/derived JSON/JSONL inside the new captures dir
+/custom_components/chihiros/wireshark/captures/**
+!/custom_components/chihiros/wireshark/captures/.gitkeep
