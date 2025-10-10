@@ -1,3 +1,4 @@
+# custom_components/chihiros/chihiros_led_control/weekday_encoding.py
 """Module helping for weekday encoding."""
 
 from enum import Enum

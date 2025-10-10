@@ -23,7 +23,7 @@ from .device.doser_device import app as app
 from .device.doser_device import (
     DoserDevice,
     _resolve_ble_or_fail,     # used by helpers
-    WeekdaySelect,            # local (no LED pkg dep)
+    WeekdaySelect,            # local (no LED pkg dep)  (kept for help text parity)
     encode_selected_weekdays, # local (no LED pkg dep)
 )
 
@@ -346,10 +346,11 @@ def cli_add_setting_dosing_pump(
     performance_time: Annotated[datetime, typer.Argument(formats=["%H:%M"], help="HH:MM")],
     ch_id: Annotated[int, typer.Option("--ch-id", help="Channel 0..3 (0≙CH1)", min=0, max=3)],
     ch_ml: Annotated[float, typer.Option("--ch-ml", help="Daily dose mL", min=0.2, max=999.9)],
+    # NOTE: accept strings to avoid Click EnumChoice casefold error on ints.
     weekdays: Annotated[
-        List[WeekdaySelect],
+        List[str],
         typer.Option("--weekdays", "-w", help="Repeat days; can be passed multiple times", case_sensitive=False),
-    ] = [WeekdaySelect.everyday],
+    ] = ["everyday"],
 ):
     """Add a 24h schedule entry at time with amount, on selected weekdays."""
     async def run():
@@ -358,7 +359,8 @@ def cli_add_setting_dosing_pump(
             ble = await _resolve_ble_or_fail(device_address)
             dd = DoserDevice(ble)
             _set_dd_debug_if_needed(ctx, dd)
-            mask = encode_selected_weekdays(weekdays)
+            # encode_selected_weekdays already accepts strings or enums
+            mask = encode_selected_weekdays(weekdays)  # type: ignore[arg-type]
             tenths = int(round(ch_ml * 10))
             await dd.add_setting_dosing_pump(performance_time.time(), ch_id, mask, tenths)
         except (BleakDeviceNotFoundError, BleakError, OSError):
@@ -493,6 +495,7 @@ def cli_raw_dosing_pump(
             dd = DoserDevice(ble)
             _set_dd_debug_if_needed(ctx, dd)
             await dd.raw_dosing_pump(cmd_id, mode, params, repeats)
+            typer.echo(f"Sent raw frame cmd={cmd_id} mode={mode} params={params} x{repeats}")
         except (BleakDeviceNotFoundError, BleakError, OSError):
             raise
         finally:
