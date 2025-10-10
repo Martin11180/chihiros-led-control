@@ -5,6 +5,11 @@ import asyncio
 import json
 import logging
 import os
+if os.name == "nt":
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    except Exception:
+        pass
 from abc import ABC, ABCMeta
 from datetime import datetime, time, timedelta
 from enum import Enum
@@ -28,6 +33,8 @@ from bleak_retry_connector import (
     establish_connection,
     retry_bluetooth_connection_error,
 )
+
+
 
 # ─────────────────────────────────────────────────────────────────────
 # INLINE REPLACEMENTS for LED package deps (const / weekday_encoding / exception)
@@ -371,7 +378,10 @@ class BaseDevice(ABC):
         if not self._write_char:
             raise CharacteristicMissingError("Write characteristic missing")
         for command in commands:
-            await self._client.write_gatt_char(self._write_char, command, False)
+            # Write with response improves reliability on some Windows BLE stacks
+            await self._client.write_gatt_char(self._write_char, command, response=True)
+            # tiny pacing to avoid back-to-back congestion
+            await asyncio.sleep(0.02)
 
     def _disconnected(self, client: BleakClientWithServiceCache) -> None:
         if self._expected_disconnect:
@@ -685,7 +695,7 @@ class DoserDevice(BaseDevice):
                 await client.write_gatt_char(UART_RX, frame, response=True)
             except Exception:
                 await client.write_gatt_char(UART_TX, frame, response=True)
-
+            await asyncio.sleep(0.05)
             try:
                 payload = await asyncio.wait_for(got, timeout=timeout_s)
                 return parse_totals_frame(payload)  # type: ignore[return-value]

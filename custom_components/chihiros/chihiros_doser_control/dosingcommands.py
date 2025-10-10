@@ -4,8 +4,6 @@ from __future__ import annotations
 from datetime import time, datetime
 from typing import List, Tuple
 
-# Reuse checksum/ID logic from the LED package
-from ..chihiros_led_control import commands
 from .protocol import _split_ml_25_6  # same 25.6+0.1 encoder
 
 __all__ = [
@@ -20,7 +18,8 @@ __all__ = [
     "create_reset_auto_settings_command",
     "create_schedule_weekly_byte_amount",
     "create_schedule_weekly_hi_lo",
-    "create_set_time_command",                   # <-- ADDED
+    "create_set_time_command",
+    "next_message_id",
 ]
 
 # ────────────────────────────────────────────────────────────────
@@ -45,6 +44,25 @@ def _bump_msg_id(msg_hi: int, msg_lo: int) -> tuple[int, int]:
             hi = (hi + 1) & 0xFF
     return hi, lo
 
+def next_message_id(current: Tuple[int, int] | None = None) -> Tuple[int, int]:
+    """
+    Return the next (hi, lo) message-id tuple, skipping 0x5A in either byte.
+    If 'current' is None, start from (0, 0) and produce (0, 1).
+    """
+    if current is None:
+        hi, lo = 0, 0
+    else:
+        hi, lo = int(current[0]) & 0xFF, int(current[1]) & 0xFF
+
+    lo = (lo + 1) & 0xFF
+    if lo == 0x5A:
+        lo = (lo + 1) & 0xFF
+    if lo == 0:
+        hi = (hi + 1) & 0xFF
+        if hi == 0x5A:
+            hi = (hi + 1) & 0xFF
+    return hi, lo
+
 def _sanitize_params(params: List[int]) -> List[int]:
     """Avoid 0x5A in payload bytes (mirrors other parts of the project)."""
     out: List[int] = []
@@ -52,6 +70,17 @@ def _sanitize_params(params: List[int]) -> List[int]:
         b = _clamp_byte(p)
         out.append(0x59 if b == 0x5A else b)
     return out
+
+def _xor_checksum(buf: bytes | bytearray) -> int:
+    """
+    XOR of bytes 1..end-1 (identical to protocol.py behavior).
+    """
+    if len(buf) < 2:
+        return 0
+    c = buf[1]
+    for b in buf[2:]:
+        c ^= b
+    return c & 0xFF
 
 # ────────────────────────────────────────────────────────────────
 # Core A5 encoder (165 family)
@@ -66,7 +95,7 @@ def _create_command_encoding_dosing_pump(
     """
     A5-style wire format:
       [cmd_id, 0x01, len(params)+5, msg_hi, msg_lo, cmd_mode, *params, checksum]
-    Checksum is XOR over bytes 1..end-1 (same as led-control `commands._calculate_checksum`).
+    Checksum is XOR over bytes 1..end-1.
     If checksum == 0x5A, bump msg-id and retry (do NOT mutate payload bytes).
     """
     _clamp_byte(cmd_id); _clamp_byte(cmd_mode)
@@ -79,7 +108,7 @@ def _create_command_encoding_dosing_pump(
     checksum = 0
     for _ in range(8):
         frame = bytearray([cmd_id, 1, len(ps) + 5, msg_hi, msg_lo, cmd_mode] + ps)
-        checksum = commands._calculate_checksum(frame) & 0xFF
+        checksum = _xor_checksum(frame) & 0xFF
         if checksum != 0x5A:
             return frame + bytes([checksum])
         msg_hi, msg_lo = _bump_msg_id(msg_hi, msg_lo)
