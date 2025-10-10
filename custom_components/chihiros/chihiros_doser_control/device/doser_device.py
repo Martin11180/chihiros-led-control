@@ -713,6 +713,57 @@ class DoserDevice(BaseDevice):
         return _STATE.get_containers(self.address)
 
 
+    # ─────────────────────────────────────────────────────────────
+    # Compatibility shims expected by chihirosdoserctl
+    # ─────────────────────────────────────────────────────────────
+    async def read_dosing_pump_auto_settings(
+        self,
+        ch_id: int | None = None,
+        timeout_s: float = 2.0,
+    ) -> Optional[List[float]]:
+        """
+        Back-compat: read the per-channel 24h totals.
+        Tries LED 0x5B mode 0x22 then 0x1E. Prints a friendly line and
+        returns the list [ch1..ch4] or None on timeout.
+        """
+        vals = await self.read_daily_totals(timeout_s=timeout_s, mode_5b=0x22)
+        if not vals:
+            vals = await self.read_daily_totals(timeout_s=timeout_s, mode_5b=0x1E)
+        # Print like the old CLI did (so existing callers don't have to format)
+        import typer as _typer
+        if not vals or len(vals) < 4:
+            _typer.echo("No totals frame received within timeout.")
+            return None
+        if ch_id is not None and 0 <= int(ch_id) <= 3:
+            _typer.echo(f"CH{int(ch_id)+1}: {vals[int(ch_id)]:.2f} mL (24h total)")
+        else:
+            _typer.echo(
+                f"24h totals (mL): CH1={vals[0]:.2f}, CH2={vals[1]:.2f}, "
+                f"CH3={vals[2]:.2f}, CH4={vals[3]:.2f}"
+            )
+        return vals
+
+    async def read_dosing_container_status(
+        self,
+        ch_id: int | None = None,
+        timeout_s: float = 0.0,   # kept for signature-compatibility
+    ) -> dict[str, float]:
+        """
+        Back-compat: show container volumes. We use the local cache
+        (acts as a stand-in for the app/server state).
+        Prints lines like the legacy method and also returns a dict.
+        """
+        vols = self.get_local_containers()
+        import typer as _typer
+        if ch_id is not None and 0 <= int(ch_id) <= 3:
+            ml = float(vols.get(str(int(ch_id)), 0.0))
+            _typer.echo(f"CH{int(ch_id)+1}: {ml:.1f} mL")
+        else:
+            for i in range(4):
+                ml = float(vols.get(str(i), 0.0))
+                _typer.echo(f"CH{i+1}: {ml:.1f} mL")
+        return vols
+
 # ─────────────────────────────────────────────────────────────────────
 # CLI wrappers (BLE actions)
 # ─────────────────────────────────────────────────────────────────────
