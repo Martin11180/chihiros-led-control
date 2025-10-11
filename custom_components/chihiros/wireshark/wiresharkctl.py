@@ -23,7 +23,8 @@ if str(TOOLS_DIR) not in sys.path:
 
 # Try to import helper modules from /tools
 try:
-    from wireshark_core import parse_wireshark_stream, write_jsonl  # type: ignore
+    from .wireshark_core import parse_wireshark_stream, write_jsonl  # type: ignore
+   
 except Exception:
     parse_wireshark_stream = None  # type: ignore
     write_jsonl = None  # type: ignore
@@ -79,6 +80,7 @@ def wireshark_parse(
     try:
         with infile.open("r", encoding="utf-8") as f:
             rows = parse_wireshark_stream(f, handle=handle, op=op, rx=rx)  # type: ignore
+           
             if str(outfile) == "-":
                 import sys as _sys
                 write_jsonl(rows, _sys.stdout, pretty=pretty)  # type: ignore
@@ -230,13 +232,14 @@ def wireshark_bytes_decode_to_ctl(
     raw: Annotated[bool, typer.Option("--raw/--no-raw", help="Also print decoded JSON rows")] = False,
 ) -> None:
     """Decode captured ‘Encode Message …’ blocks into normalized CTL lines."""
+    
     if parse_log_blob is None:
         raise typer.BadParameter("Protocol helpers not available in this environment.")
     try:
         text = Path(file_path).read_text(encoding="utf-8")
     except OSError as e:
         raise typer.BadParameter(f"Could not read file: {e}") from e
-
+    
     recs = parse_log_blob(text)
     if not recs:
         typer.echo("No records parsed.")
