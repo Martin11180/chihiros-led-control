@@ -1,4 +1,8 @@
 {
+   "_meta": {
+      "path_hint": "custom_components/chihiros/chihiros_template_control/data/chihiros/standart.json",
+      "note": "Standard presets shipped with the integration."
+   },
    "STANDART": {
       "ALL": {
          "color": {

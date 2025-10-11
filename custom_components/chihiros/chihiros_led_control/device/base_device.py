@@ -1,3 +1,4 @@
+# custom_components/chihiros/chihiros_led_control/device/base_device.py
 """Module defining a base device class."""
 
 from __future__ import annotations

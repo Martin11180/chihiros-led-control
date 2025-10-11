@@ -1,3 +1,4 @@
+# custom_components/chihiros/chihiros_template_control/chihirostemplatectl.py
 from __future__ import annotations
 
 import inspect
