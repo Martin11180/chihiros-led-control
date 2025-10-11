@@ -17,8 +17,25 @@ from rich.table import Table
 
 from .device import get_device_from_address, get_model_class_from_name
 from .weekday_encoding import WeekdaySelect
-from ..chihiros_template_control import storage_containers as sc
-from ..chihiros_template_control.chihirostemplatectl import app as template_app
+
+# Mount the Template Typer app under "template"
+# (robust so LED CLI still works when doser deps/HA are missing)
+try:
+    from ..chihiros_template_control import storage_containers as sc
+    from ..chihiros_template_control.chihirostemplatectl import app as template_app # type: ignore
+except Exception:
+    # Provide a small stub so `chihirosctl template --help` is informative, not a crash.
+    template_app = typer.Typer(help="Template commands unavailable")
+
+    @template_app.callback()
+    def _template_unavailable():
+        typer.secho(
+            "Template CLI is unavailable in this environment.\n"
+            "• To use doser commands without Home Assistant, ensure optional deps (e.g. bleak) are installed\n"
+            "  or use the dedicated entry point if configured.",
+            fg=typer.colors.YELLOW,
+        )
+
 
 # Mount the doser Typer app under "doser"
 # (robust so LED CLI still works when doser deps/HA are missing)
@@ -80,12 +97,17 @@ def _run_device_func(device_address: str, **kwargs: Any) -> None:
 # LED device commands
 # ────────────────────────────────────────────────────────────────
 
-@app.command()
+# ────────────────────────────────────────────────────────────────
+# chihirosctl list-devices
+# ────────────────────────────────────────────────────────────────
+
+@app.command(name="list-devices")
 def list_devices(timeout: Annotated[int, typer.Option()] = 5) -> None:
     """List all bluetooth devices.
 
     TODO: add an option to show only Chihiros devices
     """
+    print("the search for Bluetooth devices is running")
     table = Table("Name", "Address", "Model")
     discovered_devices = asyncio.run(BleakScanner.discover(timeout=timeout))
     chd = []
@@ -104,15 +126,27 @@ def list_devices(timeout: Annotated[int, typer.Option()] = 5) -> None:
     print(table)
     sc.set_template_device_trusted(chd)
 
-@app.command()
+# ────────────────────────────────────────────────────────────────
+# chihirosctl turn-on <device-address>
+# ────────────────────────────────────────────────────────────────
+
+@app.command(name="turn-on")
 def turn_on(device_address: str) -> None:
     """Turn on a light."""
+    print(f"Connect to device {device_address} and turn on")
     _run_device_func(device_address)
 
-@app.command()
+# ────────────────────────────────────────────────────────────────
+# chihirosctl turn-off <device-address>
+# ────────────────────────────────────────────────────────────────
+
+@app.command(name="turn-off")
 def turn_off(device_address: str) -> None:
     """Turn off a light."""
+    print(f"Connect to device {device_address} and turn off")
     _run_device_func(device_address)
+
+
 
 @app.command()
 def set_color_brightness(
@@ -123,14 +157,24 @@ def set_color_brightness(
     """Set color brightness of a light."""
     _run_device_func(device_address, color=color, brightness=brightness)
 
-@app.command()
+# ────────────────────────────────────────────────────────────────
+# chihirosctl set-brightness <device-address> 100
+# ────────────────────────────────────────────────────────────────
+
+@app.command(name="set-brightness")
 def set_brightness(
     device_address: str, brightness: Annotated[int, typer.Argument(min=0, max=140)]
 ) -> None:
+    print(f"Connect to device ....")
     """Set overall brightness of a light."""
     set_color_brightness(device_address, color=0, brightness=brightness)
 
+# ────────────────────────────────────────────────────────────────
+# chihirosctl set-rgb-brightness <device-address> 60 80 100 or 60 80 100 10
+#
 # Accepts 1, 3, or 4 integers (0..140); total caps enforced in BaseDevice.
+#  ────────────────────────────────────────────────────────────────
+
 @app.command(name="set-rgb-brightness")
 def set_rgb_brightness(
     device_address: str,
@@ -143,7 +187,13 @@ def set_rgb_brightness(
     print(f"Connect to device {device_address} and set RGB{'W' if len(brightness)==4 else ''} to {brightness} %")
     _run_device_func(device_address, brightness=brightness)
 
-@app.command()
+
+# ────────────────────────────────────────────────────────────────
+# chihirosctl add-setting <device-address> 8:00 18:00
+# chihirosctl add-setting <device-address> 9:00 18:00 --weekdays monday --weekdays tuesday --ramp-up-in-minutes 30 --max-brightness 75
+# ────────────────────────────────────────────────────────────────
+
+@app.command(name="add-setting")
 def add_setting(
     device_address: str,
     sunrise: Annotated[datetime, typer.Argument(formats=["%H:%M"])],
@@ -153,6 +203,7 @@ def add_setting(
     weekdays: Annotated[list[WeekdaySelect], typer.Option()] = [WeekdaySelect.everyday],
 ) -> None:
     """Add setting to a light."""
+    print(f"Connect to device ....")
     _run_device_func(
         device_address,
         sunrise=sunrise,
@@ -162,7 +213,13 @@ def add_setting(
         weekdays=weekdays,
     )
 
-@app.command()
+# ────────────────────────────────────────────────────────────────
+# chihirosctl add-rgb-setting <device-address> 8:00 18:00
+#
+#chihirosctl add-rgb-setting <device-address> 9:00 18:00 --weekdays monday --weekdays tuesday --ramp-up-in-minutes 30 --max-brightness 35 55 75
+# ────────────────────────────────────────────────────────────────
+
+@app.command(name="add-rgb-setting")
 def add_rgb_setting(
     device_address: str,
     sunrise: Annotated[datetime, typer.Argument(formats=["%H:%M"])],
@@ -172,6 +229,7 @@ def add_rgb_setting(
     weekdays: Annotated[list[WeekdaySelect], typer.Option()] = [WeekdaySelect.everyday],
 ) -> None:
     """Add setting to a RGB light."""
+    print(f"Connect to device ....")
     _run_device_func(
         device_address,
         sunrise=sunrise,
@@ -180,8 +238,11 @@ def add_rgb_setting(
         ramp_up_in_minutes=ramp_up_in_minutes,
         weekdays=weekdays,
     )
+# ────────────────────────────────────────────────────────────────
+# chihirosctl delete-setting <device-address> 8:00 18:00
+# ────────────────────────────────────────────────────────────────
 
-@app.command()
+@app.command(name="delete-setting")
 def remove_setting(
     device_address: str,
     sunrise: Annotated[datetime, typer.Argument(formats=["%H:%M"])],
@@ -190,6 +251,7 @@ def remove_setting(
     weekdays: Annotated[list[WeekdaySelect], typer.Option()] = [WeekdaySelect.everyday],
 ) -> None:
     """Remove setting from a light."""
+    print(f"Connect to device ....")
     _run_device_func(
         device_address,
         sunrise=sunrise,
@@ -198,12 +260,21 @@ def remove_setting(
         weekdays=weekdays,
     )
 
-@app.command()
+# ────────────────────────────────────────────────────────────────
+# chihirosctl reset-settings <device-address>
+# ────────────────────────────────────────────────────────────────
+
+@app.command(name="reset-settings")
 def reset_settings(device_address: str) -> None:
     """Reset settings from a light."""
+    print(f"Connect to device ....")
     _run_device_func(device_address)
 
-@app.command()
+# ────────────────────────────────────────────────────────────────
+# chihirosctl enable-auto-mode <device-address>
+# ────────────────────────────────────────────────────────────────
+
+@app.command(name="enable-auto-mode")
 def enable_auto_mode(device_address: str) -> None:
     """Enable auto mode in a light."""
     _run_device_func(device_address)
