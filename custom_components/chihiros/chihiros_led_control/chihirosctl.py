@@ -19,7 +19,7 @@ from .device import get_device_from_address, get_model_class_from_name
 from .weekday_encoding import WeekdaySelect
 
 # Mount the Template Typer app under "template"
-# (robust so LED CLI still works when doser deps/HA are missing)
+# (robust so LED CLI still works when template deps/HA are missing)
 try:
     from ..chihiros_template_control import storage_containers as sc
     from ..chihiros_template_control.chihirostemplatectl import app as template_app # type: ignore
@@ -80,18 +80,27 @@ app.add_typer(wireshark_app, name="wireshark", help="Wireshark helpers (parse/pe
 # Shared runner for device-bound methods
 # ────────────────────────────────────────────────────────────────
 
-def _run_device_func(device_address: str, **kwargs: Any) -> None:
-    command_name = inspect.stack()[1][3]
+def _run_device_func(device_address: str, method_override: str | None = None, **kwargs: Any):
+    """
+    Invoke a coroutine method on the device.
+    - If method_override is None, it uses the caller's function name.
+    - Returns the awaited result (so getters can surface values).
+    """
+    if method_override is None:
+        method_name = inspect.stack()[1][3]
+    else:
+        method_name = method_override
 
-    async def _async_func() -> None:
+    async def _async_func():
         dev = await get_device_from_address(device_address)
-        if hasattr(dev, command_name):
-            await getattr(dev, command_name)(**kwargs)
-        else:
-            print(f"{dev.__class__.__name__} doesn't support {command_name}")
+        if not hasattr(dev, method_name):
+            print(f"{dev.__class__.__name__} doesn't support {method_name}")
             raise typer.Abort()
+        meth = getattr(dev, method_name)
+        return await meth(**kwargs)
 
-    asyncio.run(_async_func())
+    return asyncio.run(_async_func())
+
 
 # ────────────────────────────────────────────────────────────────
 # LED device commands
@@ -128,34 +137,43 @@ def list_devices(timeout: Annotated[int, typer.Option()] = 5) -> None:
 
 # ────────────────────────────────────────────────────────────────
 # chihirosctl turn-on <device-address>
+# turn-on to ctl_set_turn_on -->> get_turn_on (base_device.py)
 # ────────────────────────────────────────────────────────────────
 
 @app.command(name="turn-on")
-def turn_on(device_address: str) -> None:
+def ctl_set_turn_on(device_address: str) -> None:
     """Turn on a light."""
     print(f"Connect to device {device_address} and turn on")
-    _run_device_func(device_address)
+    _run_device_func(
+        device_address,
+        method_override="get_turn_on",)
 
 # ────────────────────────────────────────────────────────────────
 # chihirosctl turn-off <device-address>
+# turn-off to ctl_set_turn_off -->> get_turn_off (base_device.py)
 # ────────────────────────────────────────────────────────────────
 
 @app.command(name="turn-off")
-def turn_off(device_address: str) -> None:
+def ctl_set_turn_off(device_address: str) -> None:
     """Turn off a light."""
     print(f"Connect to device {device_address} and turn off")
-    _run_device_func(device_address)
+    _run_device_func(
+        device_address, 
+        method_override="turn_off",)
 
 
 
-@app.command()
+@app.command(name="set-color-brightness")
 def set_color_brightness(
     device_address: str,
     color: int,
     brightness: Annotated[int, typer.Argument(min=0, max=140)],
 ) -> None:
     """Set color brightness of a light."""
-    _run_device_func(device_address, color=color, brightness=brightness)
+    _run_device_func(
+        device_address, 
+        color=color, 
+        brightness=brightness,)
 
 # ────────────────────────────────────────────────────────────────
 # chihirosctl set-brightness <device-address> 100
@@ -163,20 +181,25 @@ def set_color_brightness(
 
 @app.command(name="set-brightness")
 def set_brightness(
-    device_address: str, brightness: Annotated[int, typer.Argument(min=0, max=140)]
+    device_address: str, 
+    brightness: Annotated[int, typer.Argument(min=0, max=140)]
 ) -> None:
     print(f"Connect to device ....")
     """Set overall brightness of a light."""
-    set_color_brightness(device_address, color=0, brightness=brightness)
+    set_color_brightness(
+        device_address, 
+        color=0, 
+        brightness=brightness,)
 
 # ────────────────────────────────────────────────────────────────
 # chihirosctl set-rgb-brightness <device-address> 60 80 100 or 60 80 100 10
 #
 # Accepts 1, 3, or 4 integers (0..140); total caps enforced in BaseDevice.
+# set_rgb_brightness to ctl_set_rgb_brightness -->> get_set_rgb-brightness (base_device.py)
 #  ────────────────────────────────────────────────────────────────
 
 @app.command(name="set-rgb-brightness")
-def set_rgb_brightness(
+def ctl_set_rgb_brightness(
     device_address: str,
     brightness: Annotated[
         List[int],
@@ -185,16 +208,20 @@ def set_rgb_brightness(
 ) -> None:
     """Set per-channel RGB/RGBW brightness."""
     print(f"Connect to device {device_address} and set RGB{'W' if len(brightness)==4 else ''} to {brightness} %")
-    _run_device_func(device_address, brightness=brightness)
+    _run_device_func(
+        device_address, 
+        method_override="get_rgb_brightness", 
+        brightness=brightness,)
 
 
 # ────────────────────────────────────────────────────────────────
 # chihirosctl add-setting <device-address> 8:00 18:00
 # chihirosctl add-setting <device-address> 9:00 18:00 --weekdays monday --weekdays tuesday --ramp-up-in-minutes 30 --max-brightness 75
+# add-setting to ctl_set_add_setting -->> get_add_setting (base_device.py)
 # ────────────────────────────────────────────────────────────────
 
 @app.command(name="add-setting")
-def add_setting(
+def ctl_set_add_setting(
     device_address: str,
     sunrise: Annotated[datetime, typer.Argument(formats=["%H:%M"])],
     sunset: Annotated[datetime, typer.Argument(formats=["%H:%M"])],
@@ -206,6 +233,7 @@ def add_setting(
     print(f"Connect to device ....")
     _run_device_func(
         device_address,
+        method_override="get_add_setting",
         sunrise=sunrise,
         sunset=sunset,
         max_brightness=max_brightness,
@@ -217,10 +245,11 @@ def add_setting(
 # chihirosctl add-rgb-setting <device-address> 8:00 18:00
 #
 #chihirosctl add-rgb-setting <device-address> 9:00 18:00 --weekdays monday --weekdays tuesday --ramp-up-in-minutes 30 --max-brightness 35 55 75
+# set_add_rgb_setting to ctl_set_add_rgb_setting -->> get_add_rgb_setting (base_device.py)
 # ────────────────────────────────────────────────────────────────
 
 @app.command(name="add-rgb-setting")
-def add_rgb_setting(
+def ctl_set_add_rgb_setting(
     device_address: str,
     sunrise: Annotated[datetime, typer.Argument(formats=["%H:%M"])],
     sunset: Annotated[datetime, typer.Argument(formats=["%H:%M"])],
@@ -232,6 +261,7 @@ def add_rgb_setting(
     print(f"Connect to device ....")
     _run_device_func(
         device_address,
+        method_override="get_add_rgb_setting",
         sunrise=sunrise,
         sunset=sunset,
         max_brightness=max_brightness,
@@ -240,10 +270,11 @@ def add_rgb_setting(
     )
 # ────────────────────────────────────────────────────────────────
 # chihirosctl delete-setting <device-address> 8:00 18:00
+# remove_setting to ctl_set_remove_setting -->> get_add_rgb_setting (base_device.py)
 # ────────────────────────────────────────────────────────────────
 
 @app.command(name="delete-setting")
-def remove_setting(
+def ctl_set_remove_setting(
     device_address: str,
     sunrise: Annotated[datetime, typer.Argument(formats=["%H:%M"])],
     sunset: Annotated[datetime, typer.Argument(formats=["%H:%M"])],
@@ -254,6 +285,7 @@ def remove_setting(
     print(f"Connect to device ....")
     _run_device_func(
         device_address,
+        method_override="get_add_rgb_setting",
         sunrise=sunrise,
         sunset=sunset,
         ramp_up_in_minutes=ramp_up_in_minutes,
@@ -262,22 +294,30 @@ def remove_setting(
 
 # ────────────────────────────────────────────────────────────────
 # chihirosctl reset-settings <device-address>
+# reset_settings to ctl_set_reset_settings -->> get_reset_settings (base_device.py)
 # ────────────────────────────────────────────────────────────────
 
 @app.command(name="reset-settings")
-def reset_settings(device_address: str) -> None:
+def ctl_set_reset_settings(device_address: str) -> None:
     """Reset settings from a light."""
     print(f"Connect to device ....")
-    _run_device_func(device_address)
+    _run_device_func(
+        device_address,
+        method_override="get_reset_settings",
+        )
 
 # ────────────────────────────────────────────────────────────────
 # chihirosctl enable-auto-mode <device-address>
+# enable_auto_mode to ctl_set_enable_auto_modes -->> get_enable_auto_mode (base_device.py)
 # ────────────────────────────────────────────────────────────────
 
 @app.command(name="enable-auto-mode")
-def enable_auto_mode(device_address: str) -> None:
+def ctl_set_enable_auto_modes(device_address: str) -> None:
     """Enable auto mode in a light."""
-    _run_device_func(device_address)
+    _run_device_func(
+        device_address,
+        method_override="get_enable_auto_mode"
+        )
 
 if __name__ == "__main__":
     try:

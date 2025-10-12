@@ -305,3 +305,105 @@ def wireshark_btsnoop_to_jsonl(
                 write_jsonl_btsnoop(iter_btsnoop_records(infile), out, pretty=pretty)  # type: ignore
     except Exception as e:
         raise typer.BadParameter(f"btsnoop conversion failed: {e}") from e
+    
+@app.command("extract-frames")
+def wireshark_extract_frames(
+    infile: Annotated[Path, typer.Argument(exists=True, readable=True, help="JSONL created by btsnoop-to-jsonl")],
+    outfile: Annotated[Path, typer.Option("--out", "-o", help="Output file with JSON lines {cmd,mode,params}")]=Path("-"),
+    also_hex: Annotated[bool, typer.Option("--also-hex/--no-also-hex", help="Also write a .hex file with raw frames")]=False,
+) -> None:
+    """
+    Scan btsnoop JSONL (raw HCI) for embedded A5/5B frames and export them as JSON lines
+    that `bytes-decode` understands: {"cmd":165,"mode":27,"params":[...]}.
+
+    This is a heuristic: we look for 0xA5/0x5B, verify XOR checksum and slice cmd/mode/params.
+    """
+    import json
+
+    def _xor_checksum(buf: bytes) -> int:
+        # same as protocol.py: XOR from index 1..end
+        c = buf[1]
+        for b in buf[2:]:
+            c ^= b
+        return c & 0xFF
+
+    def _find_frames(payload: bytes) -> list[bytes]:
+        out: list[bytes] = []
+        n = len(payload)
+        # try every starting position; frames are typically short (< 64), but we allow up to ~128
+        for i in range(n):
+            first = payload[i]
+            if first not in (0xA5, 0x5B):
+                continue
+            # minimal frame len is 8 (cmd,01,len,hi,lo,mode,p0,chk)
+            for L in range(8, min(128, n - i) + 1):
+                s = payload[i:i + L]
+                if len(s) < 8:
+                    continue
+                # basic structure: s[1] should be 0x01, checksum must match
+                if s[1] != 0x01:
+                    continue
+                if _xor_checksum(s[:-1]) != s[-1]:
+                    continue
+                # length field sanity: s[2] = params_len + (fixed fields after len)
+                # For our A5/5B encoders len = len(params)+5 and total frame is 3 + (len)+1
+                params_len = s[2] - 5
+                expected_total = 3 + s[2] + 1
+                if params_len < 0 or expected_total != len(s):
+                    continue
+                out.append(bytes(s))
+                break  # don’t report overlapping larger slices starting at same i
+        return out
+
+    def _frame_to_jsonline(frm: bytes) -> str | None:
+        if len(frm) < 8:
+            return None
+        cmd = frm[0]
+        mode = frm[5]
+        params = list(int(x) for x in frm[6:-1])
+        return json.dumps({"cmd": int(cmd), "mode": int(mode), "params": params}, ensure_ascii=False)
+
+    # read JSONL
+    frames_jsonl: list[str] = []
+    frames_hex: list[str] = []
+    with infile.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            hx = obj.get("bytes_hex")
+            if not isinstance(hx, str) or len(hx) < 4:
+                continue
+            try:
+                raw = bytes.fromhex(hx)
+            except ValueError:
+                continue
+            for frm in _find_frames(raw):
+                j = _frame_to_jsonline(frm)
+                if j:
+                    frames_jsonl.append(j)
+                    frames_hex.append(frm.hex(" "))
+
+    if not frames_jsonl:
+        typer.secho("No A5/5B frames found.", fg=typer.colors.YELLOW)
+        raise typer.Exit(2)
+
+    # write outputs
+    if str(outfile) == "-":
+        import sys
+        for j in frames_jsonl:
+            sys.stdout.write(j + "\n")
+    else:
+        outfile.parent.mkdir(parents=True, exist_ok=True)
+        outfile.write_text("\n".join(frames_jsonl) + "\n", encoding="utf-8")
+
+    if also_hex:
+        hex_path = outfile.with_suffix(".hex") if str(outfile) != "-" else None
+        if hex_path:
+            hex_path.write_text("\n".join(frames_hex) + "\n", encoding="utf-8")
+
+    typer.secho(f"Extracted {len(frames_jsonl)} frame(s).", fg=typer.colors.GREEN)    
